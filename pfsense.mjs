@@ -17,19 +17,28 @@ export function parseSnmp(text){
 }
 const num=value=>typeof value==='string'&&/^\d+$/.test(value)?Number(value):null;
 const counter=value=>typeof value==='string'&&/^\d+$/.test(value)?value:null;
+const realMemoryAvailable=values=>num(values['1.3.6.1.4.1.2021.4.5.0'])>0&&num(values['1.3.6.1.4.1.2021.4.6.0'])!==null;
 export function trafficRates(previous,current){
   const elapsed=previous?(current.time-previous.time)/1000:0;
-  const valid=previous&&elapsed>0&&elapsed<=120&&previous.index===current.index&&previous.bits===current.bits&&current.agentTicks>=previous.agentTicks&&current.discontinuity===previous.discontinuity&&previous.up&&current.up;
+  // PPP interfaces may report unknown/dormant while their byte counters work.
+  // Derive traffic from the counters, independently of ifOperStatus.
+  const valid=previous&&elapsed>0&&elapsed<=120&&previous.index===current.index&&previous.bits===current.bits&&current.agentTicks>=previous.agentTicks&&current.discontinuity===previous.discontinuity;
   if(!valid||[previous?.rx,previous?.tx,current.rx,current.tx].some(v=>v===null||v===undefined))return {downloadMbps:null,uploadMbps:null};
   const rx=BigInt(current.rx)-BigInt(previous.rx),tx=BigInt(current.tx)-BigInt(previous.tx);
   // A counter reset must not produce a huge spike. Rebaseline on decreases.
   if(rx<0n||tx<0n)return {downloadMbps:null,uploadMbps:null};
   return {downloadMbps:Number(rx)*8/elapsed/1e6,uploadMbps:Number(tx)*8/elapsed/1e6};
 }
-export function hostMetrics(cpu,storage){
+export function hostMetrics(cpu,storage,ucd={}){
   const loads=Object.values(cpu).map(num).filter(n=>n!==null&&n<=100);
   let memory=null;
+  const real=num(ucd['1.3.6.1.4.1.2021.4.5.0']),free=num(ucd['1.3.6.1.4.1.2021.4.6.0']);
+  if(real>0&&free!==null&&free<=real){
+    const buffers=num(ucd['1.3.6.1.4.1.2021.4.14.0'])||0,cache=num(ucd['1.3.6.1.4.1.2021.4.15.0'])||0;
+    const used=Math.max(0,real-free-buffers-cache);memory={usedBytes:used*1024,totalBytes:real*1024,percent:used/real*100};
+  }
   for(const [oid,type] of Object.entries(storage)){
+    if(memory)break;
     if(!oid.startsWith(O.storage+'.2.')||type.replace(/^\./,'')!=='1.3.6.1.2.1.25.2.1.2')continue;
     const index=oid.slice((O.storage+'.2.').length),units=num(storage[O.storage+'.4.'+index]),size=num(storage[O.storage+'.5.'+index]),used=num(storage[O.storage+'.6.'+index]);
     if(units>0&&size>0&&used!==null)memory={usedBytes:used*units,totalBytes:size*units,percent:used/size*100};
@@ -66,15 +75,18 @@ export function createPfSenseCollector(run=exec){
         const index=match[0].slice(O.descr.length+1);
         if(!/^\d+$/.test(index))throw fail('Invalid SNMP interface index.');
         const oper=`1.3.6.1.2.1.2.2.1.8.${index}`,rx64=`1.3.6.1.2.1.31.1.1.1.6.${index}`,tx64=`1.3.6.1.2.1.31.1.1.1.10.${index}`,rx32=`1.3.6.1.2.1.2.2.1.10.${index}`,tx32=`1.3.6.1.2.1.2.2.1.16.${index}`,disc=`1.3.6.1.2.1.31.1.1.1.19.${index}`;
-        const [required,cpu,storage]=await Promise.allSettled([query('snmpget',[O.agent,O.uptime,oper,rx64,tx64,rx32,tx32,disc]),query('snmpwalk',[O.cpu]),query('snmpwalk',[O.storage])]);
+        const [required,cpu,storage]=await Promise.allSettled([query('snmpget',[O.agent,O.uptime,oper,rx64,tx64,rx32,tx32,disc,'1.3.6.1.4.1.2021.4.5.0','1.3.6.1.4.1.2021.4.6.0','1.3.6.1.4.1.2021.4.14.0','1.3.6.1.4.1.2021.4.15.0']),query('snmpwalk',[O.cpu]),query('snmpwalk',[O.storage])]);
         if(required.status==='rejected')throw required.reason;
         const values=required.value,has64=counter(values[rx64])!==null&&counter(values[tx64])!==null;
         const agentTicks=num(values[O.agent]),status=num(values[oper]);
         if(agentTicks===null||status===null)throw fail('pfSense did not return interface status or uptime. Enable the MibII SNMP module.');
         const sample={index,time:performance.now(),agentTicks,up:status===1,bits:has64?64:32,rx:counter(values[has64?rx64:rx32]),tx:counter(values[has64?tx64:tx32]),discontinuity:values[disc]||null};
         const rates=trafficRates(previous,sample);previous=sample;
-        const metrics=hostMetrics(cpu.status==='fulfilled'?cpu.value:{},storage.status==='fulfilled'?storage.value:{}),hostUptime=num(values[O.uptime]);
-        const result={...rates,...metrics,interface:iface,interfaceIndex:Number(index),interfaceStatus:status===1?'up':status===2?'down':'unknown',uptimeSeconds:hostUptime===null?null:hostUptime/100,agentUptimeSeconds:agentTicks/100,counterBits:sample.bits,updatedAt:new Date().toISOString(),warmingUp:rates.downloadMbps===null,source:'snmp',warnings:[]};
+        const metrics=hostMetrics(cpu.status==='fulfilled'?cpu.value:{},storage.status==='fulfilled'?storage.value:{},values),hostUptime=num(values[O.uptime]);
+        const result={...rates,...metrics,interface:iface,interfaceIndex:Number(index),interfaceStatus:({1:'up',2:'down',3:'testing',4:'unknown',5:'dormant',6:'not present',7:'lower layer down'})[status]||'unknown',interfaceStatusCode:status,uptimeSeconds:hostUptime===null?null:hostUptime/100,agentUptimeSeconds:agentTicks/100,counterBits:sample.bits,updatedAt:new Date().toISOString(),warmingUp:rates.downloadMbps===null,source:'snmp',warnings:[]};
+        if(sample.rx===null||sample.tx===null)result.warnings.push('Interface traffic counters are unavailable. Check the selected WAN interface and MibII module.');
+        if(status!==1)result.warnings.push('SNMP interface status is '+result.interfaceStatus+'; traffic rates are calculated from observed byte counters.');
+        if(!(realMemoryAvailable(values)))result.warnings.push('Memory uses Host Resources accounting; enable UCD for system-wide RAM reporting.');
         if(!has64)result.warnings.push('64-bit counters unavailable; 32-bit rates may miss traffic across counter wraps.');
         if(metrics.cpuPercent===null||!metrics.memory)result.warnings.push('Some host metrics are unavailable. Enable Host Resources in pfSense SNMP.');
         cached={time:sample.time,result};return result;
