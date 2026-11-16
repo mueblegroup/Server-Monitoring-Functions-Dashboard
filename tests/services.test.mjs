@@ -1,6 +1,6 @@
 import {test,after} from 'node:test';
 import assert from 'node:assert/strict';
-import {integration} from '../services.mjs';
+import {integration,jellyfinImage} from '../services.mjs';
 import https from 'node:https';
 import {EventEmitter} from 'node:events';
 import {Readable} from 'node:stream';
@@ -111,4 +111,21 @@ test('Cloudflare preserves existing routes and catch-all when adding hostname',a
  mock([{result:{config:{originRequest:{connectTimeout:30},ingress:[{hostname:'old.example.com',service:'http://localhost:80'},{service:'http_status:404'}]}}},{result:{id:'record1'}},{result:{ok:true}}]);
  await integration('cloudflare',{action:'route',tunnel:'tunnel-id',zone:'zone',hostname:'new.example.com',service:'http://127.0.0.1:8080'},'POST');
  assert.equal(calls.length,3);const config=JSON.parse(calls[2].body).config;assert.equal(config.ingress.length,3);assert.equal(config.ingress[1].hostname,'old.example.com');assert.equal(config.ingress.at(-1).service,'http_status:404');assert.equal(config.originRequest.connectTimeout,30);
+});
+
+test('Hostinger billing joins subscription IDs and converts cents without inventing prices',async()=>{
+ mock([[{id:1,subscription_id:'sub-1'},{id:2,subscription_id:'sub-2'}],[{id:'sub-1',renewal_price:12345,currency_code:'MYR',is_auto_renewed:true,next_billing_at:'2026-12-10',billing_period:1,billing_period_unit:'month'},{id:'sub-2',is_auto_renewed:false,next_billing_at:'2026-12-10',expires_at:'2027-01-01'}]]);
+ const result=await integration('hostinger',{view:'billing'},'GET');assert.equal(result.servers[0].billing.amount,123.45);assert.equal(result.servers[1].billing.amount,null);assert.equal(result.servers[1].billing.due,'2027-01-01');assert.equal(calls[1].url,'https://developers.hostinger.com/api/billing/v1/subscriptions');
+});
+test('Hostinger still returns servers when billing permissions fail',async()=>{
+ let count=0;globalThis.fetch=async()=>++count===1?new Response(JSON.stringify([{id:1}])):new Response('Unauthorized',{status:401});
+ const result=await integration('hostinger',{view:'billing'},'GET');assert.equal(result.servers[0].id,1);assert.ok(result.billingError);
+});
+
+test('Jellyfin artwork uses the configured server and keeps credentials in request headers',async()=>{
+ process.env.JELLYFIN_URL='http://jellyfin.example:8096';process.env.JELLYFIN_TOKEN='private-token';
+ globalThis.fetch=async(url,options)=>{assert.equal(url,'http://jellyfin.example:8096/Items/abc123/Images/Backdrop?maxWidth=1000&quality=85');assert.equal(options.headers['X-Emby-Token'],'private-token');assert.equal(options.redirect,'manual');return new Response(new Uint8Array([1,2,3]),{headers:{'content-type':'image/jpeg'}});};
+ const result=await jellyfinImage('abc123','Backdrop');assert.equal(result.type,'image/jpeg');assert.equal(result.bytes.length,3);
+ await assert.rejects(jellyfinImage('../escape','Backdrop'),/Invalid/);
+ globalThis.fetch=async()=>new Response('<script>',{headers:{'content-type':'text/html'}});await assert.rejects(jellyfinImage('abc123','Backdrop'),/Invalid artwork/);
 });
