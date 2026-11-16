@@ -1,3 +1,5 @@
+import {createMonitoring} from './monitoring.mjs';
+import {validateExperience} from './experience-state.mjs';
 import http from 'node:http';
 import { readFileSync, mkdirSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
@@ -20,6 +22,8 @@ CREATE TABLE IF NOT EXISTS audit(id INTEGER PRIMARY KEY, time TEXT, email TEXT, 
 CREATE TABLE IF NOT EXISTS events(id TEXT PRIMARY KEY, time TEXT, type TEXT, amount INTEGER, currency TEXT);`);
 db.exec('CREATE TABLE IF NOT EXISTS dashboard_preferences(email TEXT PRIMARY KEY, value TEXT NOT NULL)');
 db.exec('CREATE TABLE IF NOT EXISTS personal_workspace(email TEXT PRIMARY KEY,value TEXT NOT NULL)');
+db.exec('CREATE TABLE IF NOT EXISTS dashboard_experience(email TEXT PRIMARY KEY,value TEXT NOT NULL)');
+const monitoring=createMonitoring(db);
 const digest = s => createHash('sha256').update(s).digest('hex');
 const token = () => randomBytes(32).toString('hex');
 const admin = process.env.ADMIN_EMAIL;
@@ -40,6 +44,8 @@ files['/spotify-player.mjs']=['public/spotify-player.mjs','text/javascript'];
 files['/billing.mjs']=['public/billing.mjs','text/javascript'];
 files['/motion.mjs']=['public/motion.mjs','text/javascript'];
 files['/motion.css']=['public/motion.css','text/css'];
+for(const name of ['experience','experience-data','layout-editor','kiosk'])files['/'+name+'.mjs']=['public/'+name+'.mjs','text/javascript'];
+files['/experience.css']=['public/experience.css','text/css'];
 files['/personal.mjs']=['public/personal.mjs','text/javascript'];
 async function body(req) {
   const chunks=[]; let size=0;
@@ -76,6 +82,12 @@ export async function handler(req,res){
       db.prepare('INSERT OR IGNORE INTO events VALUES(?,?,?,?,?)').run(event.id,new Date().toISOString(),event.type,obj.amount_received??obj.amount??0,obj.currency||'');
       send(200,{received:true});return;
     }
+    const callback=path.match(/^\/api\/automation-events\/([-\w]{1,64})$/);
+    if(callback&&req.method==='POST'){
+      const action=monitoring.callbackTarget(callback[1]),supplied=Buffer.from(req.headers.authorization||''),expected=Buffer.from('Bearer '+(action?.callbackToken||''));
+      if(!action?.callbackToken||supplied.length!==expected.length||!timingSafeEqual(supplied,expected))fail('Invalid workflow callback token',401);
+      monitoring.record(action.id,JSON.parse(await body(req)));send(200,{ok:true});return;
+    }
     if(req.method!=='GET' && req.headers.origin!==origin) fail('Origin rejected',403);
     if(path==='/api/login' && req.method==='POST') {
       const ip=req.socket.remoteAddress,now=Date.now();
@@ -106,7 +118,16 @@ export async function handler(req,res){
     if(req.method==='POST'&&path==='/api/spotify/token'){send(200,await spotify.token(session.email));return;}
     if(req.method==='POST'&&path==='/api/spotify/disconnect'){send(200,spotify.disconnect(session.email));return;}
     if(req.method==='POST'&&path==='/api/spotify/command'){send(200,await spotify.command(session.email,JSON.parse(await body(req))));return;}
+    if(path==='/api/experience'&&req.method==='GET'){const row=db.prepare('SELECT value FROM dashboard_experience WHERE email=?').get(session.email);send(200,row?JSON.parse(row.value):{});return;}
+    if(path==='/api/experience'&&req.method==='POST'){const value=validateExperience(JSON.parse(await body(req)));db.prepare('INSERT INTO dashboard_experience VALUES(?,?) ON CONFLICT(email) DO UPDATE SET value=excluded.value').run(session.email,JSON.stringify(value));send(200,value);return;}
+    if(path==='/api/operations'&&req.method==='GET'){send(200,monitoring.status());return;}
+    if(path==='/api/power'&&req.method==='GET'){const node=url.searchParams.get('node')||'';if(!/^[-\w.]{0,100}$/.test(node))fail('Invalid host');send(200,monitoring.power(node));return;}
+    if(path==='/api/automation/run'&&req.method==='POST'){
+      const b=JSON.parse(await body(req));if(typeof b.id!=='string'||b.confirm!==b.id)fail('Confirm the selected workflow');let outcome='failed';
+      try{const result=await monitoring.run(b.id);outcome='accepted';send(200,result);}finally{db.prepare('INSERT INTO audit(time,email,service,action,outcome) VALUES(?,?,?,?,?)').run(new Date().toISOString(),session.email,'automation',String(b.id).slice(0,64),outcome);}return;
+    }
     if(path==='/api/dashboard'&&req.method==='GET'){
+
       const row=db.prepare('SELECT value FROM dashboard_preferences WHERE email=?').get(session.email);
       send(200,row?JSON.parse(row.value):{});return;
     }
@@ -116,7 +137,7 @@ export async function handler(req,res){
     if(path==='/api/dashboard'&&req.method==='POST'){
       const b=JSON.parse(await body(req));
       const valid=tileIds;
-      if(!b||!Array.isArray(b.widgets)||b.widgets.length<13||b.widgets.length>valid.length||new Set(b.widgets.map(w=>w?.id)).size!==b.widgets.length||b.widgets.some(w=>!w||!valid.includes(w.id)||typeof w.visible!=='boolean'||![4,6,12].includes(w.width))||valid.filter(id=>!['codex','bills','hostinger'].includes(id)).some(id=>!b.widgets.some(w=>w.id===id))||![0,15,30,60].includes(b.refresh)||typeof b.node!=='string'||!/^[-\w.]{0,100}$/.test(b.node))fail('Invalid dashboard layout');
+      if(!b||!Array.isArray(b.widgets)||b.widgets.length<13||b.widgets.length>valid.length||new Set(b.widgets.map(w=>w?.id)).size!==b.widgets.length||b.widgets.some(w=>!w||!valid.includes(w.id)||typeof w.visible!=='boolean'||![4,6,12].includes(w.width))||valid.slice(0,16).filter(id=>!['codex','bills','hostinger'].includes(id)).some(id=>!b.widgets.some(w=>w.id===id))||![0,15,30,60].includes(b.refresh)||typeof b.node!=='string'||!/^[-\w.]{0,100}$/.test(b.node))fail('Invalid dashboard layout');
       if(b.musicPlaylist!==undefined&&(typeof b.musicPlaylist!=='string'||!/^[-\w]{0,150}$/.test(b.musicPlaylist)))fail('Invalid YouTube playlist ID');
       const value={widgets:b.widgets.map(({id,visible,width})=>({id,visible,width})),node:b.node,refresh:b.refresh,...(b.musicPlaylist!==undefined?{musicPlaylist:b.musicPlaylist}:{}),...(b.cockpitVersion===1?{cockpitVersion:1}:{})};
       db.prepare('INSERT INTO dashboard_preferences VALUES(?,?) ON CONFLICT(email) DO UPDATE SET value=excluded.value').run(session.email,JSON.stringify(value));
@@ -145,5 +166,5 @@ export async function handler(req,res){
   }catch(e){send(e.status||(e instanceof SyntaxError?400:502),{error:e.status?e.message:e instanceof SyntaxError?'Invalid JSON request or service response.':'Service request failed. Check configuration, permissions and connectivity.'});}
 }
 export const server = http.createServer(handler);
-export const closeDatabase = () => db.close();
-if(process.env.ORBIT_TEST_MODE!=='true') server.listen(Number(process.env.PORT||3000),process.env.HOST||'127.0.0.1',()=>console.log(`Orbit listening on ${origin}`));
+export const closeDatabase = () => {monitoring.stop();db.close();};
+if(process.env.ORBIT_TEST_MODE!=='true') server.listen(Number(process.env.PORT||3000),process.env.HOST||'127.0.0.1',()=>{console.log(`Orbit listening on ${origin}`);monitoring.start();});
