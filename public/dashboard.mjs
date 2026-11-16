@@ -1,5 +1,7 @@
+import {sampleTrend,sparkline} from './trends.mjs';
 const definitions=[['cpu','CPU usage',4],['memory','Memory & swap',4],['health','Server health',4],['storage','Storage pools',6],['guests','Containers & VMs',6],['clock','Clock',4],['weather','Weather',4],['infrastructure','Infrastructure',4],['network','Network',6],['music','Music',6],['stripe','Stripe events',4],['movies','Movies',4],['launch','Quick launch',4]];
-export const defaultLayout=()=>({node:'',refresh:30,musicPlaylist:'',widgets:[definitions.find(d=>d[0]==='music'),...definitions.filter(d=>d[0]!=='music')].map(([id,,width])=>({id,width,visible:true}))});
+const front=['clock','music','cpu','memory','health','network'];
+export const defaultLayout=()=>({node:'',refresh:30,musicPlaylist:'',cockpitVersion:1,widgets:[...front.map(id=>definitions.find(d=>d[0]===id)),...definitions.filter(d=>!front.includes(d[0]))].map(([id,,width])=>({id,width,visible:true}))});
 export function playlistId(input){
   const value=String(input||'').trim();if(!value)return '';
   if(/^[-\w]{8,150}$/.test(value))return value;
@@ -17,6 +19,8 @@ export function mountDashboard({api,esc,connected,demo,openModal,toast}){
   const cards=new Map();
   const existing=['clock','weather','infrastructure','network','music','stripe','movies','launch'];
   [...grid.children].forEach((el,index)=>{el.dataset.widget=existing[index];cards.set(existing[index],el);});
+  const weather=cards.get('weather').querySelector('#weather');
+  if(weather){weather.classList.add('cockpit-weather');cards.get('clock').append(weather);cards.get('weather').innerHTML='<div class="card-head"><h2>Weather</h2></div><p>Local conditions appear beside the clock on the first screen.</p>';}
   if(!demo){cards.get('network').innerHTML='<div class="card-head"><h2>Network pulse</h2><span class="label">PFSENSE</span></div><div id="network-metrics"><p>Connect pfSense SNMP to see WAN traffic and firewall health.</p></div>';}
   for(const [id,title] of definitions.slice(0,5)){
     const el=document.createElement('section');el.className='card span4';el.dataset.widget=id;
@@ -52,12 +56,15 @@ export function mountDashboard({api,esc,connected,demo,openModal,toast}){
       const body=cards.get('network').querySelector('#network-metrics');
       body.innerHTML=`<div class="flex"><span class="mono">${esc(data.interface||'WAN')}</span><span class="status ${data.interfaceStatus==='up'?'':'off'}">${esc(data.interfaceStatus||'Connected')}</span></div><div class="network-values"><div><span class="subtle">Download</span><div class="metric mono">${rate(data.downloadMbps)}<small>Mbps</small></div></div><div><span class="subtle">Upload</span><div class="metric mono">${rate(data.uploadMbps)}<small>Mbps</small></div></div></div>${data.warmingUp?'<p class="subtle">Sampling traffic. Rates appear after the next refresh.</p>':''}<dl class="data-list"><dt>CPU (SNMP)</dt><dd>${numeric(data.cpuPercent)?Number(data.cpuPercent).toFixed(1)+'%':'Unavailable'}</dd><dt>Memory</dt><dd>${data.memory?Number(data.memory.percent).toFixed(1)+'% ('+bytes(data.memory.usedBytes)+' / '+bytes(data.memory.totalBytes)+')':'Unavailable'}</dd><dt>Firewall uptime</dt><dd>${uptime(data.uptimeSeconds)}</dd></dl><p class="subtle">${data.updatedAt?'Updated '+esc(new Date(data.updatedAt).toLocaleTimeString()):'Live collector'} &middot; refreshes every 5 seconds</p>`;
       if(data.warnings?.length){const detail=document.createElement('details');detail.innerHTML='<summary>Metric notes</summary>';const text=document.createElement('p');text.textContent=data.warnings.join(' ');detail.append(text);body.append(detail);}
+      const trend=sampleTrend('wan:'+(data.interface||'WAN'),data.updatedAt?Date.parse(data.updatedAt)/1000:Date.now()/1000,numeric(data.downloadMbps)?Number(data.downloadMbps):NaN);
+      body.insertAdjacentHTML('beforeend',sparkline(trend,'WAN download throughput history')+'<p class="trend-caption">Download history &middot; sampled every 5s</p>');
     }catch(error){if(active){const body=cards.get('network').querySelector('#network-metrics');body.textContent='Network metrics unavailable: '+error.message;}}
     finally{networkBusy=false;}
   }
   const set=(id,html)=>{cards.get(id).querySelector('.host-metric').innerHTML=html;};
   function show(data){
     latest=data;const s=data.stats,selected=data.nodes.find(n=>n.node===data.node),online=selected?.status==='online';
+    const clockStatus=cards.get('clock').querySelector('.status');if(clockStatus)clockStatus.textContent=`${data.node||'No host'} · ${online?'Online':'Offline'}`;
     const options=data.nodes.map(n=>`<option value="${esc(n.node)}">${esc(n.node)}${n.status==='online'?'':' (offline)'}</option>`).join('');
     nodeSelect.innerHTML=options||'<option value="">No servers found</option>';nodeSelect.value=data.node||'';
     if(!s){for(const id of ['cpu','memory','health'])set(id,`<p>${online?'Host metrics unavailable.':selected?'Server offline.':'No servers found.'}</p>`);}
@@ -65,7 +72,14 @@ export function mountDashboard({api,esc,connected,demo,openModal,toast}){
       const cpu=percent(s.cpu,1),memory=percent(s.memory?.used,s.memory?.total),swap=percent(s.swap?.used,s.swap?.total);
       set('cpu',`<div class="metric mono">${cpu===null?'Unavailable':cpu.toFixed(1)+'<small>%</small>'}</div>${meter(cpu)}<p>${esc(s.cpuinfo?.cpus??selected?.maxcpu??'Unknown')} logical CPUs</p><p class="subtle">${esc(s.cpuinfo?.model||'')}</p>`);
       set('memory',`<div class="metric mono">${memory===null?'Unavailable':memory.toFixed(1)+'<small>%</small>'}</div>${meter(memory)}<p>${bytes(s.memory?.used)} / ${bytes(s.memory?.total)}</p><div class="divider"></div><div class="flex"><span class="subtle">Swap</span><strong>${Number(s.swap?.total)===0?'Disabled':swap===null?'Unavailable':swap.toFixed(1)+'%'}</strong></div><p class="subtle">${bytes(s.swap?.used)} / ${bytes(s.swap?.total)}</p>`);
-      set('health',`<span class="status"><i class="dot"></i>${online?'Online':'Unknown'}</span><dl class="data-list"><dt>Server</dt><dd>${esc(data.node)}</dd><dt>Uptime</dt><dd>${uptime(s.uptime)}</dd><dt>Load (1 / 5 / 15 min)</dt><dd>${esc(Array.isArray(s.loadavg)?s.loadavg.join(' / '):'Unavailable')}</dd><dt>Proxmox</dt><dd>${esc(s.pveversion||'Unavailable')}</dd><dt>Root filesystem</dt><dd>${bytes(s.rootfs?.used)} / ${bytes(s.rootfs?.total)}</dd></dl>`);
+      const disk=percent(s.rootfs?.used,s.rootfs?.total);
+      set('health',`<div class="metric mono">${disk===null?'--':disk.toFixed(1)}<small>% disk</small></div><p class="subtle">${esc(data.node)} &middot; uptime ${uptime(s.uptime)}</p><dl class="data-list host-details"><dt>Load (1 / 5 / 15 min)</dt><dd>${esc(Array.isArray(s.loadavg)?s.loadavg.join(' / '):'Unavailable')}</dd><dt>Proxmox</dt><dd>${esc(s.pveversion||'Unavailable')}</dd><dt>Root filesystem</dt><dd>${bytes(s.rootfs?.used)} / ${bytes(s.rootfs?.total)}</dd></dl>`);
+      const at=Date.parse(data.updatedAt)/1000;
+      for(const [id,field,value] of [['cpu','cpu',cpu],['memory','memory',memory],['health','disk',disk]]){
+        let history=(data.history||[]).map(p=>({time:p.time,value:field==='cpu'&&Number.isFinite(p.cpu)?p.cpu*100:field==='memory'?percent(p.memused,p.memtotal):field==='disk'?percent(p.rootused,p.roottotal):null})).filter(p=>Number.isFinite(p.value));
+        const sampled=sampleTrend(`${id}:${data.node}`,at,value===null?NaN:value);if(history.length<2)history=sampled;
+        cards.get(id).querySelector('.host-metric').insertAdjacentHTML('beforeend',sparkline(history,`${id} usage history`,100)+`<p class="trend-caption">${(data.history||[]).length>1?'Last hour &middot; Proxmox':'Live samples since opening'}</p>`);
+      }
     }
     if(s){
       const temperatures=data.sensors?.temperatures||[],fans=data.sensors?.fans||[];
@@ -93,7 +107,7 @@ export function mountDashboard({api,esc,connected,demo,openModal,toast}){
     if(!connected('proxmox')){updated.textContent='Connect Proxmox to enable live server statistics.';return;}
     const requestedNode=layout.node;
     busy=true;toolbar.querySelector('#dashboard-refresh').disabled=true;
-    try{const result=await api('proxmox?'+new URLSearchParams({view:'stats',...(requestedNode?{node:requestedNode}:{})}));if(active&&requestedNode===layout.node){show(result.data);lastSuccess=Date.now();}}
+    try{const result=await api('proxmox?'+new URLSearchParams({view:'stats',history:'1',...(requestedNode?{node:requestedNode}:{})}));if(active&&requestedNode===layout.node){show(result.data);lastSuccess=Date.now();}}
     catch(error){if(active){updated.textContent=`${lastSuccess?'Stats are stale. ':''}${error.message}`;if(!lastSuccess)for(const id of ['cpu','memory','health','storage','guests'])set(id,'<p>Metrics unavailable. See the connection message above.</p>');}}
     finally{busy=false;if(active){toolbar.querySelector('#dashboard-refresh').disabled=false;if(requestedNode!==layout.node)refresh();}}
   }
@@ -119,6 +133,6 @@ export function mountDashboard({api,esc,connected,demo,openModal,toast}){
     form.onsubmit=async e=>{e.preventDefault();if(saving||!active)return;saving=true;const button=form.querySelector('[type=submit]');button.disabled=true;try{draft.refresh=Number(form.elements.refresh.value);await save(draft);if(active){form.closest('dialog').close();toast(demo?'Demo layout updated for this visit.':'Dashboard layout saved.');lastSuccess=null;refreshNetwork();await refresh();}}catch(error){form.querySelector('.error').textContent=error.message;}finally{saving=false;button.disabled=false;}};
   };
   const onVisible=()=>{if(!document.hidden){refresh();refreshNetwork();}};document.addEventListener('visibilitychange',onVisible);
-  (async()=>{try{if(!demo){const stored=await api('dashboard');if(!active)return;if(Array.isArray(stored.widgets)&&stored.widgets.length===definitions.length){layout=stored;if(layout.musicPlaylist===undefined){layout.musicPlaylist='';layout.widgets=[{...layout.widgets.find(w=>w.id==='music'),visible:true},...layout.widgets.filter(w=>w.id!=='music')];}}}}catch(error){if(active)toast('Could not load saved layout: '+error.message);}if(active){music();apply();schedule();refresh();refreshNetwork();if(!demo)networkTimer=setInterval(refreshNetwork,5000);}})();
+  (async()=>{try{if(!demo){const stored=await api('dashboard');if(!active)return;if(Array.isArray(stored.widgets)&&stored.widgets.length===definitions.length){layout=stored;if(layout.musicPlaylist===undefined)layout.musicPlaylist='';if(layout.cockpitVersion!==1){layout.cockpitVersion=1;layout.widgets=[...front.map(id=>({...layout.widgets.find(w=>w.id===id),visible:true})),...layout.widgets.filter(w=>!front.includes(w.id))];}}}}catch(error){if(active)toast('Could not load saved layout: '+error.message);}if(active){music();apply();schedule();refresh();refreshNetwork();if(!demo)networkTimer=setInterval(refreshNetwork,5000);}})();
   return ()=>{active=false;clearInterval(timer);clearInterval(networkTimer);document.removeEventListener('visibilitychange',onVisible);};
 }

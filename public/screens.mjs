@@ -51,15 +51,24 @@ export function mountScreenFit(){
   function update(){
     if(!active)return;
     setMode();
-    if(!mode){for(const card of grid.children)card.classList.remove('screen-card-hidden');for(const el of grid.querySelectorAll('.screen-item-hidden'))el.classList.remove('screen-item-hidden');pager.hidden=true;for(const controls of listPagers.values())if(!controls.hidden)controls.hidden=true;grid.style.removeProperty('--screen-columns');grid.style.removeProperty('--screen-rows');return;}
+    if(!mode){document.body.classList.remove('cockpit-layout','cockpit-front');for(const card of grid.children)card.classList.remove('screen-card-hidden');for(const el of grid.querySelectorAll('.screen-item-hidden'))el.classList.remove('screen-item-hidden');pager.hidden=true;for(const controls of listPagers.values())if(!controls.hidden)controls.hidden=true;grid.style.removeProperty('--screen-columns');grid.style.removeProperty('--screen-rows');return;}
     const width=grid.getBoundingClientRect().width,viewport=window.visualViewport?.height||window.innerHeight;
+    const cockpit=Boolean(grid.querySelector('[data-widget="clock"]'))&&window.innerWidth>viewport&&width>=720;
+    document.body.classList.toggle('cockpit-layout',cockpit);
     const bottom=document.querySelector('#nav').getBoundingClientRect().top;
     const available=Math.max(110,Math.min(viewport,bottom)-grid.getBoundingClientRect().top-54);
     const columns=width<640?1:width<1100?2:3,rows=available>=460?2:1;
     grid.style.setProperty('--screen-columns',String(columns));grid.style.setProperty('--screen-rows',String(rows));grid.style.setProperty('--screen-height',`${available}px`);
     const cards=[...grid.children].filter(el=>!el.hidden);
-    pages=packScreens(cards.map((el,id)=>({id,width:Number([...el.classList].find(c=>/^span\d+$/.test(c))?.slice(4))||4})),columns,rows);
+    const frontIds=['clock','music','cpu','memory','health','network'];
+    const frontCards=cockpit&&available>=330?cards.map((el,id)=>({el,id})).filter(({el})=>frontIds.includes(el.dataset.widget)):[];
+    const frontIndexes=new Set(frontCards.map(c=>c.id));
+    const rest=cards.map((el,id)=>({id,width:Number([...el.classList].find(c=>/^span\d+$/.test(c))?.slice(4))||4})).filter(c=>!frontIndexes.has(c.id));
+    pages=[...(frontCards.length?[frontCards.map(({el,id})=>({id,span:['clock','music'].includes(el.dataset.widget)?2:1}))]:[]),...packScreens(rest,columns,rows)];
     index=Math.max(0,Math.min(index,pages.length-1));
+    const cockpitFront=Boolean(frontCards.length)&&index===0;
+    document.body.classList.toggle('cockpit-front',cockpitFront);
+    if(cockpitFront){grid.style.setProperty('--screen-columns','4');grid.style.setProperty('--screen-rows','2');}
     const visible=new Set((pages[index]||[]).map(item=>item.id));
     cards.forEach((el,id)=>el.classList.toggle('screen-card-hidden',!visible.has(id)));
     for(const item of pages[index]||[])cards[item.id].style.setProperty('--screen-span',String(item.span));
@@ -79,5 +88,5 @@ export function mountScreenFit(){
   const resize=new ResizeObserver(schedule);resize.observe(app);window.addEventListener('resize',schedule);window.visualViewport?.addEventListener('resize',schedule);
   update();
   fullscreenChange();
-  return ()=>{active=false;cancelAnimationFrame(frame);observer.disconnect();resize.disconnect();window.removeEventListener('resize',schedule);window.visualViewport?.removeEventListener('resize',schedule);document.removeEventListener('fullscreenchange',fullscreenChange);window.removeEventListener('keydown',key,true);app.removeEventListener('touchstart',touchStart,true);app.removeEventListener('touchend',touchEnd,true);fullscreen.remove();toggle.remove();pager.remove();document.body.classList.remove('screen-fit');for(const card of original)card.classList.remove('screen-card-hidden');for(const el of grid.querySelectorAll('.screen-item-hidden'))el.classList.remove('screen-item-hidden');for(const controls of listPagers.values())controls.remove();};
+  return ()=>{active=false;cancelAnimationFrame(frame);observer.disconnect();resize.disconnect();window.removeEventListener('resize',schedule);window.visualViewport?.removeEventListener('resize',schedule);document.removeEventListener('fullscreenchange',fullscreenChange);window.removeEventListener('keydown',key,true);app.removeEventListener('touchstart',touchStart,true);app.removeEventListener('touchend',touchEnd,true);fullscreen.remove();toggle.remove();pager.remove();document.body.classList.remove('screen-fit','cockpit-layout','cockpit-front');for(const card of original)card.classList.remove('screen-card-hidden');for(const el of grid.querySelectorAll('.screen-item-hidden'))el.classList.remove('screen-item-hidden');for(const controls of listPagers.values())controls.remove();};
 }

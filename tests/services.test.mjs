@@ -55,6 +55,11 @@ test('Proxmox rejects unknown statistics nodes before requesting their metrics',
  mock([{data:[{node:'pve',status:'online'}]},{data:[]}]);
  await assert.rejects(integration('proxmox',{view:'stats',node:'other'},'GET'),/Unknown Proxmox node/);assert.equal(calls.length,2);
 });
+test('Optional last-hour graphs request Proxmox RRD without exposing extra fields',async()=>{
+ mock([{data:[{node:'pve',status:'online'}]},{data:[]},{data:{cpu:.25}},{data:[]},{data:[{time:100,cpu:.2,memused:50,memtotal:100,rootused:20,roottotal:100,unneeded:'private'}]}]);
+ const result=await integration('proxmox',{view:'stats',history:'1'},'GET');
+ assert.equal(result.history[0].cpu,.2);assert.equal(result.history[0].unneeded,undefined);assert.ok(calls[4].url.endsWith('/rrddata?timeframe=hour&cf=AVERAGE'));
+});
 test('Offline Proxmox nodes do not trigger status or storage calls',async()=>{
  mock([{data:[{node:'pve',status:'offline'}]},{data:[]}]);const result=await integration('proxmox',{view:'stats'},'GET');
  assert.equal(result.stats,null);assert.equal(calls.length,2);

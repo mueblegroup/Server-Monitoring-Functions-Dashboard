@@ -77,11 +77,12 @@ export async function integration(service,b,method){
             if(value?.node!==selected)throw Object.assign(new Error('Sensor collector node does not match the selected Proxmox node.'),{status:424});
             const clean=(rows,key,min,max)=>(Array.isArray(rows)?rows:[]).filter(r=>r&&Number.isFinite(r[key])&&r[key]>=min&&r[key]<=max).slice(0,100).map(r=>({label:String(r.label||'Sensor').slice(0,100),[key]:r[key]}));
             return {temperatures:clean(value.temperatures,'celsius',-50,200),fans:clean(value.fans,'rpm',0,100000)};
-          }):Promise.resolve(null)]):[];
+          }):Promise.resolve(null),b.history==='1'?call(`/nodes/${selected}/rrddata?timeframe=hour&cf=AVERAGE`):Promise.resolve([])]):[];
         return {nodes:nodes.map(({node,status,cpu,maxcpu,mem,maxmem,uptime})=>({node,status,cpu,maxcpu,mem,maxmem,uptime})),node:selected,
           stats:results[0]?.status==='fulfilled'?results[0].value:null,
           storage:results[1]?.status==='fulfilled'?results[1].value:[],
           sensors:results[2]?.status==='fulfilled'?results[2].value:null,
+          history:results[3]?.status==='fulfilled'&&Array.isArray(results[3].value)?results[3].value.map(({time,cpu,memused,memtotal,rootused,roottotal})=>({time,cpu,memused,memtotal,rootused,roottotal})):[],
           guests:resources.filter(r=>r.node===selected).map(({vmid,name,type,status,cpu,mem,maxmem})=>({vmid,name,type,status,cpu,mem,maxmem})),
           errors:results.filter(r=>r.status==='rejected').map(r=>r.reason?.message||'Metrics unavailable'),updatedAt:new Date().toISOString()};
       }

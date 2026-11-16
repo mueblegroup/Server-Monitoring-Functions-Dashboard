@@ -92,6 +92,10 @@ The community remains server-side and is passed through a temporary owner-readab
 
 ## Customizable overview and host statistics
 
+The first landscape screen uses a cockpit arrangement: large clock/local weather on the left, music on the right, and four small CPU, RAM, host/root-disk, and WAN tiles beneath. Hardware sensor badges remain in the host tile. Other widgets continue on subsequent screens. On smaller portrait displays, normal card packing preserves readability. Use Expand view to see all detail fields and the custom widget widths.
+
+CPU, memory, and root-disk sparklines use the last hour of Proxmox RRD data when available. The optional RRD request can fail without losing current host metrics. WAN download history builds from real SNMP samples while the dashboard is open (up to 30 minutes); it has no backfilled history. Until enough samples exist, the tile says Collecting history. Curves have no synthetic live data. Music continues to use YouTube's supported embedded playlist player rather than custom Spotify-style account controls.
+
 ### Music and fullscreen
 
 The music card is first on new layouts. Older layouts are promoted once when adding playlist support; afterward the normal Customize controls can move it. Choose **Connect playlist**, paste a YouTube Music/YouTube playlist Share link, and save. The playlist must be public or unlisted and allow embedding. Playback uses the YouTube privacy-enhanced embedded player with no autoplay; click Play. This connects a playlist, not the full YouTube Music account/library. No API key, password, cookies, or OAuth token is needed. Private playlists and restricted tracks may require opening the official YouTube Music app instead.
