@@ -1,5 +1,5 @@
 import {calendarDate} from './public/billing.mjs';
-export const tileIds=['cpu','memory','health','storage','guests','clock','weather','infrastructure','network','music','movies','codex','stripe','launch','bills','hostinger'];
+export const tileIds=['cpu','memory','health','storage','guests','clock','weather','infrastructure','network','music','movies','codex','stripe','launch','bills','hostinger','stack','power','uptime','backups','automation','billingSummary'];
 export function validateWorkspace(input){
   const fail=()=>{throw Object.assign(new Error('Invalid page or recurring billing settings'),{status:400});};
   const validId=value=>typeof value==='string'&&/^[a-zA-Z0-9-]{1,64}$/.test(value);
