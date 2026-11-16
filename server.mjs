@@ -38,6 +38,8 @@ files['/screens.css']=['public/screens.css','text/css'];
 files['/trends.mjs']=['public/trends.mjs','text/javascript'];
 files['/spotify-player.mjs']=['public/spotify-player.mjs','text/javascript'];
 files['/billing.mjs']=['public/billing.mjs','text/javascript'];
+files['/motion.mjs']=['public/motion.mjs','text/javascript'];
+files['/motion.css']=['public/motion.css','text/css'];
 files['/personal.mjs']=['public/personal.mjs','text/javascript'];
 async function body(req) {
   const chunks=[]; let size=0;
@@ -126,7 +128,7 @@ export async function handler(req,res){
     if(path==='/api/weather'&&req.method==='GET') {
       const lat=Number(url.searchParams.get('lat')),lon=Number(url.searchParams.get('lon'));
       if(!url.searchParams.has('lat')||!url.searchParams.has('lon')||!Number.isFinite(lat)||!Number.isFinite(lon)||Math.abs(lat)>90||Math.abs(lon)>180) fail('Invalid coordinates');
-      const r=await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,relative_humidity_2m,weather_code&timezone=auto`,{signal:AbortSignal.timeout(10000)});
+      const r=await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,relative_humidity_2m,weather_code,is_day&timezone=auto`,{signal:AbortSignal.timeout(10000)});
       if(!r.ok) fail('Weather unavailable',502);send(200,await r.json());return;
     }
     const match=path.match(/^\/api\/(proxmox|hestia|cloudflare|hostinger|jellyfin|pfsense)$/);
