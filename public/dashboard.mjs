@@ -1,3 +1,4 @@
+import {loadingState} from './motion.mjs';
 import {personalWorkspace,renderBills,renderHostinger,renderMovies} from './personal.mjs';
 import {mountSpotify} from './spotify-player.mjs';
 import {sampleTrend,sparkline} from './trends.mjs';
@@ -29,11 +30,11 @@ export function mountDashboard({api,esc,connected,demo,openModal,toast,customPag
   if(!demo){cards.get('network').innerHTML='<div class="card-head"><h2>Network pulse</h2><span class="label">PFSENSE</span></div><div id="network-metrics"><p>Connect pfSense SNMP to see WAN traffic and firewall health.</p></div>';}
   for(const [id,title] of definitions.slice(0,5)){
     const el=document.createElement('section');el.className='card span4';el.dataset.widget=id;
-    el.innerHTML=`<div class="card-head"><h2>${title}</h2><span class="label">PROXMOX</span></div><div class="host-metric">${connected('proxmox')?'Loading metrics...':'Connect Proxmox to see host metrics.'}</div>`;
+    el.innerHTML=`<div class="card-head"><h2>${title}</h2><span class="label">PROXMOX</span></div><div class="host-metric">${connected('proxmox')?loadingState('Loading metrics'):'Connect Proxmox to see host metrics.'}</div>`;
     cards.set(id,el);grid.append(el);
   }
   const quotaCard=document.createElement('section');quotaCard.className='card span6';quotaCard.dataset.widget='codex';quotaCard.innerHTML='<div class="card-head"><h2>OpenAI Codex</h2><span class="label">USAGE LIMITS</span></div><div class="quota-body">Connect the Codex CLI to see account usage.</div>';cards.set('codex',quotaCard);grid.append(quotaCard);
-  for(const id of ['bills','hostinger']){const card=document.createElement('section');card.className='card span6';card.dataset.widget=id;card.innerHTML='<h2>'+definitions.find(d=>d[0]===id)[1]+'</h2><p>Loading...</p>';cards.set(id,card);grid.append(card);}
+  for(const id of ['bills','hostinger']){const card=document.createElement('section');card.className='card span6';card.dataset.widget=id;card.innerHTML='<h2>'+definitions.find(d=>d[0]===id)[1]+'</h2>'+loadingState('Loading');cards.set(id,card);grid.append(card);}
   async function refreshQuota(){
     if(!active||demo||quotaBusy||document.hidden||quotaCard.hidden)return;quotaBusy=true;
     const body=quotaCard.querySelector('.quota-body');
@@ -130,13 +131,13 @@ export function mountDashboard({api,esc,connected,demo,openModal,toast,customPag
     if(data.errors?.length){const detail=document.createElement('details');detail.innerHTML='<summary>Metric connection details</summary>';const p=document.createElement('p');p.textContent=data.errors.join(' | ');detail.append(p);cards.get('health').querySelector('.host-metric').append(detail);}
   }
   const sample=()=>({nodes:[{node:'demo-node',status:'online',maxcpu:8}],node:'demo-node',stats:{cpu:.24,cpuinfo:{cpus:8,model:'Example host CPU'},memory:{used:18*1073741824,total:32*1073741824},swap:{used:0,total:4*1073741824},rootfs:{used:30*1073741824,total:100*1073741824},uptime:918000,loadavg:['1.2','0.9','0.8'],pveversion:'Demo'},storage:[{storage:'local-lvm',active:1,type:'lvmthin',used:200*1073741824,total:500*1073741824}],guests:[{type:'lxc',status:'running'},{type:'qemu',status:'stopped'}],errors:[],updatedAt:new Date().toISOString()});
-  async function refresh(){
+  async function refresh(foreground=false){
     if(!active||busy||document.hidden)return;
     if(demo){show(sample());return;}
     if(!connected('proxmox')){updated.textContent='Connect Proxmox to enable live server statistics.';return;}
     const requestedNode=layout.node;
     busy=true;toolbar.querySelector('#dashboard-refresh').disabled=true;
-    try{const result=await api('proxmox?'+new URLSearchParams({view:'stats',history:'1',...(requestedNode?{node:requestedNode}:{})}));if(active&&requestedNode===layout.node){show(result.data);lastSuccess=Date.now();}}
+    try{const result=await api('proxmox?'+new URLSearchParams({view:'stats',history:'1',...(requestedNode?{node:requestedNode}:{})}),{loading:foreground});if(active&&requestedNode===layout.node){show(result.data);lastSuccess=Date.now();}}
     catch(error){if(active){updated.textContent=`${lastSuccess?'Stats are stale. ':''}${error.message}`;if(!lastSuccess)for(const id of ['cpu','memory','health','storage','guests'])set(id,'<p>Metrics unavailable. See the connection message above.</p>');}}
     finally{busy=false;if(active){toolbar.querySelector('#dashboard-refresh').disabled=false;if(requestedNode!==layout.node)refresh();}}
   }
@@ -146,7 +147,7 @@ export function mountDashboard({api,esc,connected,demo,openModal,toast,customPag
     layout=await api('dashboard',{method:'POST',body:JSON.stringify(next)});if(active){apply();schedule();}
   }
   toolbar.querySelector('#dashboard-pages').onclick=()=>personal.pages();
-  toolbar.querySelector('#dashboard-refresh').onclick=()=>{refresh();refreshNetwork();};
+  toolbar.querySelector('#dashboard-refresh').onclick=()=>{refresh(true);refreshNetwork();};
   nodeSelect.onchange=async()=>{
     const previous=layout.node;
     try{await save({...layout,node:nodeSelect.value});lastSuccess=null;await refresh();}
