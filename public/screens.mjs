@@ -18,6 +18,12 @@ export function mountScreenFit(){
   let active=true,frame,index=0,pages=[],start=null;
   const header=document.querySelector('.header-right'),toggle=document.createElement('button');
   toggle.className='small-button view-mode';toggle.type='button';header.prepend(toggle);
+  const fullscreen=document.createElement('button');fullscreen.type='button';fullscreen.className='small-button fullscreen-toggle';fullscreen.textContent='Full screen';fullscreen.setAttribute('aria-label','Enter fullscreen dashboard');header.prepend(fullscreen);
+  fullscreen.disabled=!document.fullscreenEnabled;
+  if(fullscreen.disabled)fullscreen.title='Fullscreen is not supported in this browser. Use browser fullscreen or Add to Home Screen.';
+  const fullscreenChange=()=>{fullscreen.textContent=document.fullscreenElement?'Exit fullscreen':'Full screen';fullscreen.setAttribute('aria-label',document.fullscreenElement?'Exit fullscreen dashboard':'Enter fullscreen dashboard');schedule();};
+  fullscreen.onclick=async()=>{try{if(document.fullscreenElement)await document.exitFullscreen();else{mode=true;setMode();await document.documentElement.requestFullscreen();}schedule();}catch{fullscreen.title='Fullscreen was blocked by your browser. Try its fullscreen command.';fullscreen.textContent='Fullscreen blocked';}};
+  document.addEventListener('fullscreenchange',fullscreenChange);
   const pager=document.createElement('div');pager.className='screen-pager';pager.setAttribute('aria-label','Widget screens');grid.after(pager);
   const original=[...grid.children];
   const listPagers=new Map(),listIndexes=new Map();
@@ -72,5 +78,6 @@ export function mountScreenFit(){
   const observer=new MutationObserver(schedule);observer.observe(grid,{childList:true,subtree:true,attributes:true,attributeFilter:['hidden']});
   const resize=new ResizeObserver(schedule);resize.observe(app);window.addEventListener('resize',schedule);window.visualViewport?.addEventListener('resize',schedule);
   update();
-  return ()=>{active=false;cancelAnimationFrame(frame);observer.disconnect();resize.disconnect();window.removeEventListener('resize',schedule);window.visualViewport?.removeEventListener('resize',schedule);window.removeEventListener('keydown',key,true);app.removeEventListener('touchstart',touchStart,true);app.removeEventListener('touchend',touchEnd,true);toggle.remove();pager.remove();document.body.classList.remove('screen-fit');for(const card of original)card.classList.remove('screen-card-hidden');for(const el of grid.querySelectorAll('.screen-item-hidden'))el.classList.remove('screen-item-hidden');for(const controls of listPagers.values())controls.remove();};
+  fullscreenChange();
+  return ()=>{active=false;cancelAnimationFrame(frame);observer.disconnect();resize.disconnect();window.removeEventListener('resize',schedule);window.visualViewport?.removeEventListener('resize',schedule);document.removeEventListener('fullscreenchange',fullscreenChange);window.removeEventListener('keydown',key,true);app.removeEventListener('touchstart',touchStart,true);app.removeEventListener('touchend',touchEnd,true);fullscreen.remove();toggle.remove();pager.remove();document.body.classList.remove('screen-fit');for(const card of original)card.classList.remove('screen-card-hidden');for(const el of grid.querySelectorAll('.screen-item-hidden'))el.classList.remove('screen-item-hidden');for(const controls of listPagers.values())controls.remove();};
 }
