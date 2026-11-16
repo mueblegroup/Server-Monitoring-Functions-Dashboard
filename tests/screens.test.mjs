@@ -1,6 +1,13 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {packScreens} from '../public/screens.mjs';
+import {packScreens,screenGeometry} from '../public/screens.mjs';
+test('Phone and tablet geometry reserves usable card height in both orientations',()=>{
+ const phonePortrait=screenGeometry(370,650,true,false);assert.deepEqual(phonePortrait,{columns:1,rows:2,cockpit:false});assert.ok(650/phonePortrait.rows>=280);
+ const phoneLandscape=screenGeometry(824,210,true,true);assert.deepEqual(phoneLandscape,{columns:2,rows:1,cockpit:false});
+ const tabletPortrait=screenGeometry(800,990,true,false);assert.deepEqual(tabletPortrait,{columns:2,rows:3,cockpit:false});assert.ok(990/tabletPortrait.rows>=280);
+ const tabletLandscape=screenGeometry(1160,640,true,true);assert.equal(tabletLandscape.cockpit,true);
+ assert.equal(screenGeometry(1000,400,true,true).cockpit,false);
+});
 test('Phone screen packing preserves order and puts full-width widgets on separate screens',()=>{
  const cards=[{id:'cpu',width:4},{id:'memory',width:6},{id:'network',width:12}];
  assert.deepEqual(packScreens(cards,1,1),cards.map(({id})=>[{id,span:1}]));
