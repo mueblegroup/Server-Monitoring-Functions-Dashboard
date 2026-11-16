@@ -5,6 +5,7 @@ import {mkdtempSync,rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {createHmac} from 'node:crypto';
+import {defaultLayout} from '../public/dashboard.mjs';
 const dir=mkdtempSync(join(tmpdir(),'orbit-test-'));
 const origin='http://127.0.0.1:3097';
 let handler,closeDatabase,cookie,csrf;
@@ -30,6 +31,18 @@ test('invalid credentials and hostile origins are rejected',async()=>{assert.equ
 test('remembered login has a 90-day HttpOnly cookie',async()=>{const r=await request('login','POST',{email:'test@example.com',password:'correct-long-passphrase',remember:true});assert.equal(r.status,200);const set=r.headers.get('set-cookie');assert.match(set,/Max-Age=7776000/);assert.match(set,/HttpOnly/);assert.match(set,/SameSite=Strict/);cookie=set.split(';')[0];csrf=(await r.json()).csrf;assert.equal((await request('session')).status,200);});
 test('actions require CSRF, explicit confirmation and configuration',async()=>{assert.equal((await request('proxmox','POST',{action:'stop'})).status,403);assert.equal((await request('proxmox','POST',{action:'stop'},{'X-CSRF-Token':csrf})).status,400);assert.equal((await request('proxmox','POST',{action:'stop',confirm:'stop'},{'X-CSRF-Token':csrf})).status,503);const r=await request('audit');const entries=await r.json();assert.equal(entries[0].outcome,'failed');});
 test('GET cannot perform mutations',async()=>{assert.equal((await request('proxmox?action=remove')).status,405);});
+test('Dashboard layouts require authenticated CSRF-protected writes and persist valid widget order',async()=>{
+ assert.deepEqual(await (await request('dashboard')).json(),{});
+ const layout=defaultLayout();layout.widgets.reverse();layout.widgets[0].visible=false;layout.refresh=15;layout.node='proxmox-main';
+ assert.equal((await request('dashboard','POST',layout)).status,403);
+ const saved=await request('dashboard','POST',layout,{'X-CSRF-Token':csrf});assert.equal(saved.status,200);
+ assert.deepEqual(await (await request('dashboard')).json(),layout);
+ const invalid=structuredClone(layout);invalid.widgets[0].id=invalid.widgets[1].id;
+ assert.equal((await request('dashboard','POST',invalid,{'X-CSRF-Token':csrf})).status,400);
+ assert.equal((await request('dashboard','POST',{...layout,refresh:1},{'X-CSRF-Token':csrf})).status,400);
+ assert.deepEqual(await (await request('dashboard')).json(),layout);
+ assert.equal((await request('dashboard', 'GET', undefined,{Cookie:''})).status,401);
+});
 test('Stripe rejects forged signatures and deduplicates valid events',async()=>{
  const raw=JSON.stringify({id:'evt_test',type:'payment_intent.succeeded',data:{object:{amount_received:40000,currency:'myr'}}});
  assert.equal((await request('stripe/webhook','POST',raw,{'stripe-signature':'t=0,v1=bad'})).status,401);

@@ -63,6 +63,21 @@ export async function integration(service,b,method){
   if(service==='proxmox') {
     const call=(path,m='GET',data)=>request(env('PROXMOX_URL'),'/api2/json'+path,{Authorization:`PVEAPIToken=${env('PROXMOX_TOKEN_ID')}=${env('PROXMOX_TOKEN_SECRET')}`},m,data,true,true).then(x=>x.data);
     if(method==='GET'){
+      if(b.view==='stats'){
+        const [nodes,resources]=await Promise.all([call('/nodes'),call('/cluster/resources?type=vm')]);
+        if(!Array.isArray(nodes)||!Array.isArray(resources))throw Object.assign(new Error('Proxmox returned an invalid node inventory.'),{status:424});
+        const selected=b.node?name(b.node):(nodes.find(n=>n.status==='online')?.node||nodes[0]?.node);
+        if(!selected)return {nodes:[],node:null,stats:null,storage:[],guests:[],errors:[],updatedAt:new Date().toISOString()};
+        name(selected);
+        if(!nodes.some(n=>n.node===selected))throw Object.assign(new Error('Unknown Proxmox node'),{status:400});
+        const online=nodes.find(n=>n.node===selected).status==='online';
+        const results=online?await Promise.allSettled([call(`/nodes/${selected}/status`),call(`/nodes/${selected}/storage`)]):[];
+        return {nodes:nodes.map(({node,status,cpu,maxcpu,mem,maxmem,uptime})=>({node,status,cpu,maxcpu,mem,maxmem,uptime})),node:selected,
+          stats:results[0]?.status==='fulfilled'?results[0].value:null,
+          storage:results[1]?.status==='fulfilled'?results[1].value:[],
+          guests:resources.filter(r=>r.node===selected).map(({vmid,name,type,status,cpu,mem,maxmem})=>({vmid,name,type,status,cpu,mem,maxmem})),
+          errors:results.filter(r=>r.status==='rejected').map(r=>r.reason?.message||'Metrics unavailable'),updatedAt:new Date().toISOString()};
+      }
       if(b.node&&b.vmid){
         const prefix=`/nodes/${name(b.node)}/${b.type==='qemu'?'qemu':'lxc'}/${id(b.vmid)}`;
         const data=await call(prefix+(b.type==='qemu'?'/agent/network-get-interfaces':'/interfaces'));

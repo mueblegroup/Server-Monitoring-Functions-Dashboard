@@ -14,6 +14,7 @@ CREATE TABLE IF NOT EXISTS users(email TEXT PRIMARY KEY, salt TEXT, hash TEXT);
 CREATE TABLE IF NOT EXISTS sessions(hash TEXT PRIMARY KEY, email TEXT, csrf TEXT, expires INTEGER);
 CREATE TABLE IF NOT EXISTS audit(id INTEGER PRIMARY KEY, time TEXT, email TEXT, service TEXT, action TEXT, outcome TEXT);
 CREATE TABLE IF NOT EXISTS events(id TEXT PRIMARY KEY, time TEXT, type TEXT, amount INTEGER, currency TEXT);`);
+db.exec('CREATE TABLE IF NOT EXISTS dashboard_preferences(email TEXT PRIMARY KEY, value TEXT NOT NULL)');
 const digest = s => createHash('sha256').update(s).digest('hex');
 const token = () => randomBytes(32).toString('hex');
 const admin = process.env.ADMIN_EMAIL;
@@ -25,7 +26,7 @@ const attempts = new Map();
 const origin = process.env.PUBLIC_ORIGIN || 'http://localhost:3000';
 const secure = process.env.COOKIE_SECURE === 'true';
 const cookie = (value,age) => `orbit=${value}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${age}${secure?'; Secure':''}`;
-const files = {'/':['public/index.html','text/html'], '/app.js':['public/app.js','text/javascript'], '/response.mjs':['public/response.mjs','text/javascript'], '/style.css':['public/style.css','text/css'], '/manifest.webmanifest':['public/manifest.webmanifest','application/manifest+json'], '/icon.svg':['public/icon.svg','image/svg+xml']};
+const files = {'/':['public/index.html','text/html'], '/app.js':['public/app.js','text/javascript'], '/dashboard.mjs':['public/dashboard.mjs','text/javascript'], '/response.mjs':['public/response.mjs','text/javascript'], '/style.css':['public/style.css','text/css'], '/manifest.webmanifest':['public/manifest.webmanifest','application/manifest+json'], '/icon.svg':['public/icon.svg','image/svg+xml']};
 async function body(req) {
   const chunks=[]; let size=0;
   for await (const chunk of req) { size+=chunk.length; if(size>65536) throw Object.assign(new Error('Request too large'),{status:413}); chunks.push(chunk); }
@@ -80,6 +81,18 @@ export async function handler(req,res){
     if(!session) fail('Sign in to continue',401);
     if(req.method!=='GET'&&req.headers['x-csrf-token']!==session.csrf) fail('Session verification failed',403);
     if(path==='/api/session'&&req.method==='GET'){send(200,{email:session.email,csrf:session.csrf,configured:configured()});return;}
+    if(path==='/api/dashboard'&&req.method==='GET'){
+      const row=db.prepare('SELECT value FROM dashboard_preferences WHERE email=?').get(session.email);
+      send(200,row?JSON.parse(row.value):{});return;
+    }
+    if(path==='/api/dashboard'&&req.method==='POST'){
+      const b=JSON.parse(await body(req));
+      const valid=['cpu','memory','storage','guests','health','clock','weather','infrastructure','network','music','stripe','movies','launch'];
+      if(!b||!Array.isArray(b.widgets)||b.widgets.length!==valid.length||new Set(b.widgets.map(w=>w?.id)).size!==valid.length||b.widgets.some(w=>!w||!valid.includes(w.id)||typeof w.visible!=='boolean'||![4,6,12].includes(w.width))||![0,15,30,60].includes(b.refresh)||typeof b.node!=='string'||!/^[-\w.]{0,100}$/.test(b.node))fail('Invalid dashboard layout');
+      const value={widgets:b.widgets.map(({id,visible,width})=>({id,visible,width})),node:b.node,refresh:b.refresh};
+      db.prepare('INSERT INTO dashboard_preferences VALUES(?,?) ON CONFLICT(email) DO UPDATE SET value=excluded.value').run(session.email,JSON.stringify(value));
+      send(200,value);return;
+    }
     if(path==='/api/logout'&&req.method==='POST'){db.prepare('DELETE FROM sessions WHERE hash=?').run(digest(sid));res.setHeader('Set-Cookie',cookie('',0));send(200,{ok:true});return;}
     if(path==='/api/audit'&&req.method==='GET'){send(200,db.prepare('SELECT * FROM audit ORDER BY id DESC LIMIT 50').all());return;}
     if(path==='/api/stripe'&&req.method==='GET'){send(200,{configured:!!process.env.STRIPE_WEBHOOK_SECRET,events:db.prepare('SELECT * FROM events ORDER BY time DESC LIMIT 20').all()});return;}
