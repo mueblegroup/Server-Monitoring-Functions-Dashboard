@@ -43,6 +43,26 @@ test('Proxmox token and unprivileged CT allocation are sent correctly',async()=>
  const payload=new URLSearchParams(calls[0].body);assert.equal(payload.get('unprivileged'),'1');assert.equal(payload.get('rootfs'),'local-lvm:8');assert.equal(payload.get('net0'),'name=eth0,bridge=vmbr0,ip=dhcp');
 });
 test('Proxmox refuses path injection before any upstream call',async()=>{mock([]);await assert.rejects(integration('proxmox',{action:'stop',node:'../evil',vmid:'300'},'POST'),/Invalid name/);assert.equal(calls.length,0);});
+test('Proxmox host statistics select an online node and scope guests to it',async()=>{
+ mock([{data:[{node:'offline',status:'offline'},{node:'pve',status:'online',maxcpu:8}]},
+  {data:[{node:'pve',vmid:100,type:'lxc',status:'running'},{node:'other',vmid:200,type:'qemu'}]},
+  {data:{cpu:.25,memory:{used:10,total:100},swap:{used:0,total:10},uptime:1000}},{data:[{storage:'local',used:20,total:100,active:1}]}]);
+ const result=await integration('proxmox',{view:'stats'},'GET');
+ assert.equal(result.node,'pve');assert.equal(result.stats.cpu,.25);assert.equal(result.guests.length,1);assert.equal(result.storage[0].storage,'local');
+ assert.equal(calls.length,4);assert.ok(calls.every(c=>c.method==='GET'));assert.deepEqual(result.errors,[]);
+});
+test('Proxmox rejects unknown statistics nodes before requesting their metrics',async()=>{
+ mock([{data:[{node:'pve',status:'online'}]},{data:[]}]);
+ await assert.rejects(integration('proxmox',{view:'stats',node:'other'},'GET'),/Unknown Proxmox node/);assert.equal(calls.length,2);
+});
+test('Offline Proxmox nodes do not trigger status or storage calls',async()=>{
+ mock([{data:[{node:'pve',status:'offline'}]},{data:[]}]);const result=await integration('proxmox',{view:'stats'},'GET');
+ assert.equal(result.stats,null);assert.equal(calls.length,2);
+});
+test('A failed storage request preserves usable CPU and memory statistics',async()=>{
+ let count=0;globalThis.fetch=async()=>{count++;if(count===1)return Response.json({data:[{node:'pve',status:'online'}]});if(count===2)return Response.json({data:[]});if(count===3)return Response.json({data:{cpu:.5}});return new Response('',{status:403});};
+ const result=await integration('proxmox',{view:'stats'},'GET');assert.equal(result.stats.cpu,.5);assert.equal(result.errors.length,1);assert.deepEqual(result.storage,[]);
+});
 test('Proxmox power actions send the correct method and endpoint',async()=>{
  for(const type of ['lxc','qemu'])for(const action of ['start','stop','shutdown','reboot']){
   mock([{data:'UPID:test'}]);
