@@ -11,7 +11,7 @@ test('service HTML, redirects and authentication failures become safe actionable
  const original=globalThis.fetch;
  try{
   globalThis.fetch=async()=>new Response('<!DOCTYPE html>private-page');
-  await assert.rejects(integration('proxmox',{},'GET'),e=>e.status===502&&e.message.includes('pve.example:8006')&&e.message.includes('HTML')&&!e.message.includes('private-page'));
+  await assert.rejects(integration('proxmox',{},'GET'),e=>e.status===424&&e.message.includes('pve.example:8006')&&e.message.includes('HTML')&&!e.message.includes('private-page'));
   globalThis.fetch=async()=>new Response('',{status:302});
   await assert.rejects(integration('proxmox',{},'GET'),/redirected/);
   globalThis.fetch=async()=>new Response('private-body',{status:403});
