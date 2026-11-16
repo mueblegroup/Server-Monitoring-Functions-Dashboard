@@ -1,4 +1,29 @@
+import https from 'node:https';
 const env=k=>process.env[k];
+// Only configured private server integrations may opt out of certificate checks.
+function serverRequest(url,options){
+  return new Promise((resolve,reject)=>{
+    const headers={...options.headers};
+    if(options.body!==undefined)headers['Content-Length']=Buffer.byteLength(options.body);
+    const req=https.request(url,{method:options.method,headers,rejectUnauthorized:false,agent:false,signal:options.signal},res=>{
+      const chunks=[];let size=0;
+      res.on('data',chunk=>{
+        size+=chunk.length;
+        if(size>4*1024*1024){res.destroy(new Error('Service response too large'));return;}
+        chunks.push(chunk);
+      });
+      res.on('error',reject);
+      res.on('end',()=>{
+        const text=Buffer.concat(chunks).toString('utf8');
+        resolve({status:res.statusCode,ok:res.statusCode>=200&&res.statusCode<300,
+          headers:{get:key=>res.headers[key.toLowerCase()]||null},
+          text:async()=>text,json:async()=>JSON.parse(text)});
+      });
+    });
+    req.on('error',reject);
+    req.end(options.body);
+  });
+}
 const needs={proxmox:['PROXMOX_URL','PROXMOX_TOKEN_ID','PROXMOX_TOKEN_SECRET'],hestia:['HESTIA_URL','HESTIA_ACCESS_KEY','HESTIA_SECRET_KEY'],cloudflare:['CLOUDFLARE_TOKEN','CLOUDFLARE_ACCOUNT_ID'],hostinger:['HOSTINGER_TOKEN'],jellyfin:['JELLYFIN_URL','JELLYFIN_TOKEN'],pfsense:['PFSENSE_METRICS_URL','PFSENSE_METRICS_TOKEN']};
 export const configured=()=>Object.fromEntries(Object.entries(needs).map(([k,v])=>[k,v.every(x=>!!env(x))]));
 function requireValue(value,pattern,label){if(typeof value!=='string'||!pattern.test(value)) throw Object.assign(new Error(`Invalid ${label}`),{status:400});return value;}
@@ -6,16 +31,17 @@ const id=v=>requireValue(String(v??''),/^\d{1,10}$/,'ID');
 const name=v=>requireValue(v,/^[a-zA-Z0-9_.-]{1,100}$/,'name');
 const domain=v=>requireValue(v,/^(?=.{1,253}$)(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,63}$/,'domain');
 function allowed(action,actions){if(!actions.includes(action))throw Object.assign(new Error('Unsupported action'),{status:400});}
-async function request(base,path,headers={},method='GET',data,form=false){
+async function request(base,path,headers={},method='GET',data,form=false,privateServer=false){
   // A provider failure is a failed dependency, not an Orbit gateway outage.
   // Keep JSON diagnostics separate from proxy-generated 502 error pages.
   const error=message=>Object.assign(new Error(message),{status:424});
   let u;try{u=new URL(base);}catch{throw error('Invalid service base URL. Include http:// or https:// and the panel port.');}
   if(!['http:','https:'].includes(u.protocol)||u.username||u.password||u.search||u.hash)throw error('Invalid service URL. Use a base URL without credentials, query parameters or fragments.');
   let r;
-  try {r=await fetch(base.replace(/\/$/,'')+path,{method,redirect:'manual',signal:AbortSignal.timeout(20000),headers:{...headers,...(data?{'Content-Type':form?'application/x-www-form-urlencoded':'application/json'}:{})},body:data?(form?new URLSearchParams(data).toString():JSON.stringify(data)):undefined});}
+  const transport=u.protocol==='https:'&&privateServer&&env('SERVER_TLS_VERIFY')==='false'?serverRequest:fetch;
+  try {r=await transport(base.replace(/\/$/,'')+path,{method,redirect:'manual',signal:AbortSignal.timeout(20000),headers:{...headers,...(data?{'Content-Type':form?'application/x-www-form-urlencoded':'application/json'}:{})},body:data?(form?new URLSearchParams(data).toString():JSON.stringify(data)):undefined});}
   catch(e){
-    const code=e.cause?.code;
+    const code=e.cause?.code||e.code;
     const hint=['ENOTFOUND','EAI_AGAIN'].includes(code)?'DNS lookup failed. Check that the container can resolve the panel hostname.':['ECONNREFUSED','ETIMEDOUT','EHOSTUNREACH','ENETUNREACH'].includes(code)?'Cannot reach the panel. Check its port, firewall and container routing.':/CERT|TLS|SELF_SIGNED/.test(code||'')?'TLS certificate verification failed. Install the private CA using NODE_EXTRA_CA_CERTS.':e.name==='TimeoutError'?'The service timed out. Check container connectivity.':'Connection failed. Check the URL, TLS certificate and network access.';
     throw error(`${u.host}: ${hint}${code?` (${code})`:''}`);
   }
@@ -35,7 +61,7 @@ async function request(base,path,headers={},method='GET',data,form=false){
 export async function integration(service,b,method){
   if(!configured()[service])throw Object.assign(new Error('Not connected. Configure this service in the server environment.'),{status:503});
   if(service==='proxmox') {
-    const call=(path,m='GET',data)=>request(env('PROXMOX_URL'),'/api2/json'+path,{Authorization:`PVEAPIToken=${env('PROXMOX_TOKEN_ID')}=${env('PROXMOX_TOKEN_SECRET')}`},m,data,true).then(x=>x.data);
+    const call=(path,m='GET',data)=>request(env('PROXMOX_URL'),'/api2/json'+path,{Authorization:`PVEAPIToken=${env('PROXMOX_TOKEN_ID')}=${env('PROXMOX_TOKEN_SECRET')}`},m,data,true,true).then(x=>x.data);
     if(method==='GET'){
       if(b.node&&b.vmid){
         const prefix=`/nodes/${name(b.node)}/${b.type==='qemu'?'qemu':'lxc'}/${id(b.vmid)}`;
@@ -64,7 +90,7 @@ export async function integration(service,b,method){
   if(service==='hestia'){
     const call=async(command,args=[])=>{
       const data={hash:env('HESTIA_ACCESS_KEY')+':'+env('HESTIA_SECRET_KEY'),returncode:'no',cmd:command};args.forEach((x,i)=>data['arg'+(i+1)]=x);
-      const result=await request(env('HESTIA_URL'),'/api/',{},'POST',data,true);
+      const result=await request(env('HESTIA_URL'),'/api/',{},'POST',data,true,true);
       if(typeof result==='number'&&result!==0)throw new Error('Hestia command failed');return result;
     };
     if(method==='GET'){
@@ -96,6 +122,6 @@ export async function integration(service,b,method){
     allowed(b.action,['start','stop','restart']);return request('https://developers.hostinger.com',base+'/'+id(b.vmid)+'/'+b.action,headers,'POST');
   }
   if(method!=='GET')throw Object.assign(new Error('Read-only integration'),{status:405});
-  if(service==='jellyfin')return request(env('JELLYFIN_URL'),'/Items?IncludeItemTypes=Movie&Recursive=true&SortBy=Random&Limit=8&Fields=Overview',{Authorization:`MediaBrowser Token="${env('JELLYFIN_TOKEN')}"`});
-  if(service==='pfsense')return request(env('PFSENSE_METRICS_URL'),'',{Authorization:'Bearer '+env('PFSENSE_METRICS_TOKEN')});
+  if(service==='jellyfin')return request(env('JELLYFIN_URL'),'/Items?IncludeItemTypes=Movie&Recursive=true&SortBy=Random&Limit=8&Fields=Overview',{Authorization:`MediaBrowser Token="${env('JELLYFIN_TOKEN')}"`},'GET',undefined,false,true);
+  if(service==='pfsense')return request(env('PFSENSE_METRICS_URL'),'',{Authorization:'Bearer '+env('PFSENSE_METRICS_TOKEN')},'GET',undefined,false,true);
 }
