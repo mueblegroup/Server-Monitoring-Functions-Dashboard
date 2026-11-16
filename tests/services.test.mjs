@@ -13,6 +13,33 @@ test('Proxmox token and unprivileged CT allocation are sent correctly',async()=>
  const payload=new URLSearchParams(calls[0].body);assert.equal(payload.get('unprivileged'),'1');assert.equal(payload.get('rootfs'),'local-lvm:8');assert.equal(payload.get('net0'),'name=eth0,bridge=vmbr0,ip=dhcp');
 });
 test('Proxmox refuses path injection before any upstream call',async()=>{mock([]);await assert.rejects(integration('proxmox',{action:'stop',node:'../evil',vmid:'300'},'POST'),/Invalid name/);assert.equal(calls.length,0);});
+test('Proxmox power actions send the correct method and endpoint',async()=>{
+ for(const type of ['lxc','qemu'])for(const action of ['start','stop','shutdown','reboot']){
+  mock([{data:'UPID:test'}]);
+  assert.equal(await integration('proxmox',{action,type,node:'pve',vmid:'300'},'POST'),'UPID:test');
+  assert.equal(calls[0].url,`https://pve.example:8006/api2/json/nodes/pve/${type}/300/status/${action}`);
+  assert.equal(calls[0].method,'POST');
+ }
+});
+test('Proxmox null power responses are not reported as accepted',async()=>{
+ mock([{data:null}]);
+ await assert.rejects(integration('proxmox',{action:'start',type:'lxc',node:'pve',vmid:'300'},'POST'),/no task ID/);
+});
+test('Proxmox VM interfaces unwrap the guest-agent result and CT interfaces stay arrays',async()=>{
+ const interfaces=[{name:'eth0'}];
+ mock([{data:{result:interfaces}}]);
+ assert.deepEqual(await integration('proxmox',{type:'qemu',node:'pve',vmid:'300'},'GET'),interfaces);
+ assert.ok(calls[0].url.endsWith('/qemu/300/agent/network-get-interfaces'));
+ mock([{data:interfaces}]);
+ assert.deepEqual(await integration('proxmox',{type:'lxc',node:'pve',vmid:'300'},'GET'),interfaces);
+ assert.ok(calls[0].url.endsWith('/lxc/300/interfaces'));
+});
+test('Proxmox null interfaces explain guest prerequisites',async()=>{
+ mock([{data:null}]);
+ await assert.rejects(integration('proxmox',{type:'qemu',node:'pve',vmid:'300'},'GET'),/QEMU Guest Agent/);
+ mock([{data:null}]);
+ await assert.rejects(integration('proxmox',{type:'lxc',node:'pve',vmid:'300'},'GET'),/CT is running/);
+});
 test('Hestia uses restricted documented commands and access-key pair',async()=>{mock([0]);await integration('hestia',{action:'hsts',user:'admin',domain:'example.com'},'POST');const p=new URLSearchParams(calls[0].body);assert.equal(p.get('cmd'),'v-add-web-domain-ssl-hsts');assert.equal(p.get('hash'),'access:secret');assert.equal(p.get('arg2'),'example.com');});
 test('Hostinger uses documented stop endpoint',async()=>{mock([{id:1}]);await integration('hostinger',{action:'stop',vmid:'123'},'POST');assert.equal(calls[0].url,'https://developers.hostinger.com/api/vps/v1/virtual-machines/123/stop');assert.equal(calls[0].method,'POST');});
 test('Cloudflare preserves existing routes and catch-all when adding hostname',async()=>{
