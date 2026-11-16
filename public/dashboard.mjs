@@ -1,3 +1,4 @@
+import {mountSpotify} from './spotify-player.mjs';
 import {sampleTrend,sparkline} from './trends.mjs';
 const definitions=[['cpu','CPU usage',4],['memory','Memory & swap',4],['health','Server health',4],['storage','Storage pools',6],['guests','Containers & VMs',6],['clock','Clock',4],['weather','Weather',4],['infrastructure','Infrastructure',4],['network','Network',6],['music','Music',6],['codex','OpenAI Codex usage',6],['stripe','Stripe events',4],['movies','Movies',4],['launch','Quick launch',4]];
 const front=['clock','music','cpu','memory','health','network'];
@@ -52,15 +53,18 @@ export function mountDashboard({api,esc,connected,demo,openModal,toast}){
     for(const widget of layout.widgets){const el=cards.get(widget.id);if(!el)continue;el.hidden=!widget.visible;el.classList.remove('span3','span4','span5','span6','span7','span8','span12');el.classList.add(`span${widget.width}`);grid.append(el);}
     if(!layout.widgets.some(w=>w.visible))updated.textContent='All widgets are hidden. Choose Customize to add them back.';
   };
-  function music(){
+  let disposeMusic=()=>{};
+  function music(){disposeMusic();disposeMusic=mountSpotify(cards.get('music'),{api,toast,openModal,demo,onYouTube:()=>{disposeMusic();youtubeMusic();}});}
+  function youtubeMusic(){
     const card=cards.get('music');card.innerHTML=`<div class="card-head"><h2>YouTube Music</h2><button type="button" class="small-button" id="connect-music">${layout.musicPlaylist?'Change playlist':'Connect playlist'}</button></div><div id="music-player"></div><a class="subtle" href="https://music.youtube.com/" target="_blank" rel="noreferrer">Open YouTube Music</a>`;
+    const back=document.createElement('button');back.type='button';back.className='small-button';back.textContent='Use Spotify';back.onclick=music;card.querySelector('.card-head').append(back);
     const player=card.querySelector('#music-player');
     if(layout.musicPlaylist){const frame=document.createElement('iframe');frame.src='https://www.youtube-nocookie.com/embed/videoseries?'+new URLSearchParams({list:layout.musicPlaylist,playsinline:'1',autoplay:'0'});frame.title='YouTube playlist player';frame.allow='encrypted-media; fullscreen; picture-in-picture';frame.allowFullscreen=true;frame.referrerPolicy='strict-origin-when-cross-origin';frame.className='music-player';player.append(frame);}
     else player.innerHTML='<p>Your music, on the first screen.</p><p class="subtle">Connect a public or unlisted playlist to play here. No API key required.</p>';
     card.querySelector('#connect-music').onclick=()=>{
       openModal('<h1>Connect your playlist</h1><p>In YouTube Music, open a playlist, choose Share, then Copy link. Use a public or unlisted playlist.</p><form id="music-connect-form"><label>Playlist link or ID<input name="playlist" placeholder="https://music.youtube.com/playlist?list=..."></label><p class="subtle">This uses the YouTube embedded player. It does not sign into your YouTube Music account. Some tracks or playlists may not allow embedded playback.</p><button class="primary" type="submit">Save playlist</button><p class="error" role="alert"></p></form>');
       const form=document.querySelector('#music-connect-form');form.elements.playlist.value=layout.musicPlaylist||'';
-      form.onsubmit=async e=>{e.preventDefault();const button=form.querySelector('button');button.disabled=true;try{const id=playlistId(form.elements.playlist.value);await save({...layout,musicPlaylist:id,widgets:[{...layout.widgets.find(w=>w.id==='music'),visible:true},...layout.widgets.filter(w=>w.id!=='music')]});if(active){music();form.closest('dialog').close();toast('Playlist saved. Press Play to start.');}}catch(error){form.querySelector('.error').textContent=error.message;}finally{button.disabled=false;}};
+      form.onsubmit=async e=>{e.preventDefault();const button=form.querySelector('button');button.disabled=true;try{const id=playlistId(form.elements.playlist.value);await save({...layout,musicPlaylist:id,widgets:[{...layout.widgets.find(w=>w.id==='music'),visible:true},...layout.widgets.filter(w=>w.id!=='music')]});if(active){youtubeMusic();form.closest('dialog').close();toast('Playlist saved. Press Play to start.');}}catch(error){form.querySelector('.error').textContent=error.message;}finally{button.disabled=false;}};
     };
   }
   const meter=(value)=>value===null?'':`<progress class="host-progress" max="100" value="${value.toFixed(1)}" aria-label="Usage ${value.toFixed(1)} percent"></progress>`;
@@ -151,5 +155,5 @@ export function mountDashboard({api,esc,connected,demo,openModal,toast}){
   };
   const onVisible=()=>{if(!document.hidden){refresh();refreshNetwork();refreshQuota();}};document.addEventListener('visibilitychange',onVisible);
   (async()=>{try{if(!demo){const stored=await api('dashboard');if(!active)return;if(Array.isArray(stored.widgets)&&[definitions.length,definitions.length-1].includes(stored.widgets.length)){layout=stored;if(!layout.widgets.some(w=>w.id==='codex'))layout.widgets.splice(6,0,{id:'codex',width:6,visible:true});if(layout.musicPlaylist===undefined)layout.musicPlaylist='';if(layout.cockpitVersion!==1){layout.cockpitVersion=1;layout.widgets=[...front.map(id=>({...layout.widgets.find(w=>w.id===id),visible:true})),...layout.widgets.filter(w=>!front.includes(w.id))];}}}}catch(error){if(active)toast('Could not load saved layout: '+error.message);}if(active){music();apply();schedule();refresh();refreshNetwork();refreshQuota();if(!demo){networkTimer=setInterval(refreshNetwork,5000);quotaTimer=setInterval(refreshQuota,60000);}}})();
-  return ()=>{active=false;clearInterval(timer);clearInterval(networkTimer);clearInterval(quotaTimer);document.removeEventListener('visibilitychange',onVisible);};
+  return ()=>{active=false;disposeMusic();clearInterval(timer);clearInterval(networkTimer);clearInterval(quotaTimer);document.removeEventListener('visibilitychange',onVisible);};
 }

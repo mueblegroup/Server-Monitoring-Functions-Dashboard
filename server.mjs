@@ -6,6 +6,7 @@ import { randomBytes, scryptSync, timingSafeEqual, createHash, createHmac } from
 import { DatabaseSync } from 'node:sqlite';
 import { integration, configured } from './services.mjs';
 import {codexUsage} from './codex-usage.mjs';
+import {createSpotify} from './spotify.mjs';
 
 const root = dirname(fileURLToPath(import.meta.url));
 mkdirSync(resolve(root, 'data'), {recursive:true, mode:0o700});
@@ -25,12 +26,14 @@ if (!db.prepare('SELECT email FROM users LIMIT 1').get() && admin && process.env
 }
 const attempts = new Map();
 const origin = process.env.PUBLIC_ORIGIN || 'http://localhost:3000';
+const spotify=createSpotify(db,dirname(process.env.DB_PATH||resolve(root,'data/orbit.sqlite')),origin);
 const secure = process.env.COOKIE_SECURE === 'true';
 const cookie = (value,age) => `orbit=${value}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${age}${secure?'; Secure':''}`;
 const files = {'/':['public/index.html','text/html'], '/app.js':['public/app.js','text/javascript'], '/dashboard.mjs':['public/dashboard.mjs','text/javascript'], '/response.mjs':['public/response.mjs','text/javascript'], '/style.css':['public/style.css','text/css'], '/manifest.webmanifest':['public/manifest.webmanifest','application/manifest+json'], '/icon.svg':['public/icon.svg','image/svg+xml']};
 files['/screens.mjs']=['public/screens.mjs','text/javascript'];
 files['/screens.css']=['public/screens.css','text/css'];
 files['/trends.mjs']=['public/trends.mjs','text/javascript'];
+files['/spotify-player.mjs']=['public/spotify-player.mjs','text/javascript'];
 async function body(req) {
   const chunks=[]; let size=0;
   for await (const chunk of req) { size+=chunk.length; if(size>65536) throw Object.assign(new Error('Request too large'),{status:413}); chunks.push(chunk); }
@@ -41,14 +44,19 @@ export async function handler(req,res){
   res.setHeader('X-Content-Type-Options','nosniff');
   res.setHeader('X-Frame-Options','DENY');
   res.setHeader('Referrer-Policy','no-referrer');
-  res.setHeader('Permissions-Policy','geolocation=(self), camera=(), microphone=()');
-  res.setHeader('Content-Security-Policy',"default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-src https://www.youtube-nocookie.com; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");
+  res.setHeader('Permissions-Policy','geolocation=(self), camera=(), microphone=(), encrypted-media=(self "https://sdk.scdn.co")');
+  res.setHeader('Content-Security-Policy',"default-src 'self'; script-src 'self' https://sdk.scdn.co; style-src 'self'; img-src 'self' data: https://i.scdn.co https://mosaic.scdn.co https://*.spotifycdn.com; connect-src 'self' https://*.spotify.com wss://*.spotify.com https://*.scdn.co; frame-src https://www.youtube-nocookie.com https://sdk.scdn.co; media-src 'self' blob: https://*.scdn.co https://*.spotifycdn.com; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");
   res.setHeader('Cache-Control','no-store');
   if(secure) res.setHeader('Strict-Transport-Security','max-age=31536000');
   const send=(code,data)=>{res.writeHead(code,{'Content-Type':'application/json'});res.end(JSON.stringify(data));};
   try {
     const url=new URL(req.url,origin), path=url.pathname;
     if(req.method==='GET' && files[path]) {const [file,type]=files[path];res.writeHead(200,{'Content-Type':type});res.end(readFileSync(resolve(root,file)));return;}
+    // Cross-site OAuth callbacks cannot rely on the SameSite=Strict session cookie.
+    // The one-use state is bound to an existing, still-valid Orbit session instead.
+    if(path==='/api/spotify/callback'&&req.method==='GET'){
+      const result=await spotify.callback(url.searchParams);res.writeHead(302,{Location:'/?spotify='+result+'#overview'});res.end();return;
+    }
     if(path==='/api/stripe/webhook' && req.method==='POST') {
       const raw=await body(req),secret=process.env.STRIPE_WEBHOOK_SECRET;
       if(!secret) fail('Webhook not configured',503);
@@ -86,6 +94,11 @@ export async function handler(req,res){
     if(req.method!=='GET'&&req.headers['x-csrf-token']!==session.csrf) fail('Session verification failed',403);
     if(path==='/api/session'&&req.method==='GET'){send(200,{email:session.email,csrf:session.csrf,configured:configured()});return;}
     if(path==='/api/codex-usage'&&req.method==='GET'){send(200,await codexUsage());return;}
+    if(path==='/api/spotify/status'&&req.method==='GET'){send(200,spotify.status(session.email));return;}
+    if(req.method==='POST'&&path==='/api/spotify/connect'){send(200,spotify.connect(session.email,digest(sid)));return;}
+    if(req.method==='POST'&&path==='/api/spotify/token'){send(200,await spotify.token(session.email));return;}
+    if(req.method==='POST'&&path==='/api/spotify/disconnect'){send(200,spotify.disconnect(session.email));return;}
+    if(req.method==='POST'&&path==='/api/spotify/command'){send(200,await spotify.command(session.email,JSON.parse(await body(req))));return;}
     if(path==='/api/dashboard'&&req.method==='GET'){
       const row=db.prepare('SELECT value FROM dashboard_preferences WHERE email=?').get(session.email);
       send(200,row?JSON.parse(row.value):{});return;
