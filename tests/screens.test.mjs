@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {packScreens,screenGeometry} from '../public/screens.mjs';
+import {packScreens,screenGeometry,layoutFits} from '../public/screens.mjs';
 test('Phone and tablet geometry reserves usable card height in both orientations',()=>{
  const phonePortrait=screenGeometry(370,650,true,false);assert.deepEqual(phonePortrait,{columns:1,rows:2,cockpit:false});assert.ok(650/phonePortrait.rows>=280);
  const phoneLandscape=screenGeometry(824,210,true,true);assert.deepEqual(phoneLandscape,{columns:2,rows:1,cockpit:false});
@@ -21,4 +21,14 @@ test('Wide widgets reserve complete rows and never overflow a screen',()=>{
  const pages=packScreens(cards,3,2);
  assert.deepEqual(pages,[[{id:1,span:1},{id:2,span:3}],[{id:3,span:2},{id:4,span:2}]]);
  assert.deepEqual(packScreens([],1,1),[]);
+});
+
+test('saved coordinates reflow when their physical tiles become unreadable',()=>{
+ const plan=[{id:'cpu',x:0,y:0,w:4,h:2},{id:'memory',x:4,y:0,w:4,h:2}],original=structuredClone(plan);
+ assert.equal(layoutFits(plan,1280,600,12),true);assert.equal(layoutFits(plan,844,154,12),false);assert.equal(layoutFits(plan,1280,600,12),true);assert.deepEqual(plan,original);
+});
+test('portrait tiles fit at readable sizes and tiny cells trigger automatic layout',()=>{
+ assert.equal(layoutFits([{id:'cpu',x:0,y:0,w:12,h:3}],390,500,12),true);
+ assert.equal(layoutFits([{id:'cpu',x:0,y:0,w:1,h:1}],390,500,12),false);
+ assert.equal(layoutFits([],390,500,12),false);assert.equal(layoutFits(undefined,390,500,12),false);
 });

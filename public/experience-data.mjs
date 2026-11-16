@@ -1,6 +1,6 @@
 import {billCycle,todayLocal} from './billing.mjs';
 export const extraTiles=[['stack','Smart stack',6],['power','Power & electricity',6],['uptime','Service uptime',6],['backups','Backup status',6],['automation','Automation',6],['billingSummary','Billing overview',6]];
-export function defaultExperience(){return {layouts:{},appearance:{preset:'original',accent:'#c4f284',font:'system',spacing:12,corners:18,opacity:1},pageAppearance:{},electricity:{rate:null,currency:'MYR'},stack:{items:['cpu','memory','temperatures','fans'],interval:8},kiosk:{enabled:false,interval:30,pages:['overview'],nightStart:22,nightEnd:7,dim:.45,wake:false},alerts:{temperature:85,storage:90,billDays:7}};}
+export function defaultExperience(){return {layouts:{},appearance:{preset:'original',accent:'#c4f284',font:'system',spacing:12,corners:18,opacity:1},pageAppearance:{},electricity:{rate:null,currency:'MYR'},stack:{items:['cpu','memory','temperatures','fans'],interval:8},kiosk:{enabled:false,interval:30,pages:['overview'],nightStart:7,nightEnd:7,dim:1,wake:false},alerts:{temperature:85,storage:90,billDays:7}};}
 export const pageKey=value=>typeof value==='string'&&/^(overview|usage|billing|custom-[a-zA-Z0-9-]{1,64})$/.test(value);
 export function placementsValid(items,ids){
   if(!Array.isArray(items)||items.length>32||new Set(items.map(x=>x?.id)).size!==items.length)return false;
