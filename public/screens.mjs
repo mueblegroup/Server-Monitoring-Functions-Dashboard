@@ -15,11 +15,38 @@ export function packScreens(cards,columns,rows){
   }
   if(page.length)pages.push(page);return pages;
 }
+// Keep saved coordinates only while each tile has enough physical space to be readable.
+export function layoutFits(plan,width,height,gap=12){
+  if(!Array.isArray(plan)||!plan.length)return false;
+  const cellW=(width-11*gap)/12,cellH=(height-5*gap)/6;
+  return plan.every(p=>cellW*p.w+gap*(p.w-1)>=180&&cellH*p.h+gap*(p.h-1)>=140);
+}
+function compactReading(card){
+  const text=selector=>[...card.querySelectorAll(selector)].find(el=>!el.closest('.tile-compact-view'))?.textContent?.trim().replace(/\s+/g,' ')||'';
+  const title=text('h2')||({clock:'Clock',weather:'Weather',music:'Music'}[card.dataset.widget])||'Dashboard tile';
+  const value=text('.metric')||text('.clock')||text('.spotify-title')||text('.movie-caption h2')||text('.billing-gauge strong')||text('.billing-total strong')||text('.quota-window strong')||text('.guest-totals strong')||text('.resource h3')||text('.monitor-row')||text('.automation-row h3')||text('.billing-content h3')||text('h3')||'Open Details';
+  const note=text('.spotify-artist')||text('.stack-reading p')||text('.billing-content p')||text('.billing-total p')||text('.host-metric p')||text('#date');
+  return {title,value,note};
+}
+function fitCard(card){
+  card.classList.remove('fit-summary','fit-tight','tile-minimal');card.style.setProperty('--tile-scale','1');
+  card.classList.toggle('fit-micro',card.clientHeight<170);
+  const overflowing=()=>card.scrollHeight>card.clientHeight+2||card.scrollWidth>card.clientWidth+2;
+  if(card.clientWidth<270||card.clientHeight<250||overflowing())card.classList.add('fit-summary');
+  if(card.clientHeight<200||overflowing())card.classList.add('fit-tight');
+  // Scale content only, leaving the card grid and the Details touch target unchanged.
+  for(let scale=.95;overflowing()&&scale>=.749;scale-=.05)card.style.setProperty('--tile-scale',scale.toFixed(2));
+  if(!overflowing())return;
+  const reading=compactReading(card);let summary=card.querySelector(':scope > .tile-compact-view');
+  if(!summary){summary=document.createElement('div');summary.className='tile-compact-view';card.append(summary);}
+  summary.replaceChildren();for(const [tag,className,value]of [['h3','compact-title',reading.title],['strong','compact-value',reading.value],['p','compact-note',reading.note]]){const el=document.createElement(tag);el.className=className;el.textContent=value;summary.append(el);}
+  card.style.setProperty('--tile-scale','1');card.classList.add('tile-minimal');
+}
 export function mountScreenFit(){
   const app=document.querySelector('#app'),grid=app.querySelector(':scope > .grid');
   if(!grid)return ()=>{};
   let mode=true;try{mode=localStorage.getItem('orbit-view-mode-v2')!=='expanded';}catch{}
-  let active=true,frame,index=0,pages=[],start=null,expanded=null,singleRow=false,geometryKey='';
+  let active=true,frame,index=0,pages=[],start=null,expanded=null;
   const header=document.querySelector('.header-right'),toggle=document.createElement('button');
   toggle.className='small-button view-mode';toggle.type='button';header.prepend(toggle);
   const fullscreen=document.createElement('button');fullscreen.type='button';fullscreen.className='small-button fullscreen-toggle';fullscreen.textContent='Full screen';fullscreen.setAttribute('aria-label','Enter fullscreen dashboard');header.prepend(fullscreen);
@@ -78,7 +105,7 @@ export function mountScreenFit(){
     if(!active)return;
     setMode();
     if(expanded)return;
-    if(!mode){document.body.classList.remove('cockpit-layout','cockpit-front');for(const card of grid.children)card.classList.remove('screen-card-hidden','fit-summary','fit-tight','fit-micro');for(const el of grid.querySelectorAll('.screen-item-hidden'))el.classList.remove('screen-item-hidden');pager.hidden=true;for(const controls of listPagers.values())if(!controls.hidden)controls.hidden=true;grid.style.removeProperty('--screen-columns');grid.style.removeProperty('--screen-rows');return;}
+    if(!mode){document.body.classList.remove('cockpit-layout','cockpit-front');for(const card of grid.children){card.classList.remove('screen-card-hidden','fit-summary','fit-tight','fit-micro','tile-minimal');card.style.removeProperty('--tile-scale');}for(const el of grid.querySelectorAll('.screen-item-hidden'))el.classList.remove('screen-item-hidden');pager.hidden=true;for(const controls of listPagers.values())if(!controls.hidden)controls.hidden=true;grid.style.removeProperty('--screen-columns');grid.style.removeProperty('--screen-rows');return;}
     const width=grid.getBoundingClientRect().width,viewport=window.visualViewport?.height||window.innerHeight;
     document.documentElement.style.setProperty('--viewport-height',`${viewport}px`);
     const overview=!grid.dataset.customPage&&Boolean(grid.querySelector('[data-widget="clock"]'));
@@ -86,12 +113,12 @@ export function mountScreenFit(){
     document.body.classList.toggle('cockpit-layout',cockpit);
     const bottom=document.querySelector('#nav').getBoundingClientRect().top;
     const available=Math.max(70,Math.min(viewport,bottom-6,app.getBoundingClientRect().bottom)-grid.getBoundingClientRect().top-38);
-    const currentGeometry=`${Math.round(width)}/${Math.round(available)}`;
-    if(currentGeometry!==geometryKey){geometryKey=currentGeometry;singleRow=false;}
-    const explicit=grid._orbitPlan;
+    const savedPlan=grid._orbitPlan;
+    const gap=parseFloat(getComputedStyle(grid).gap)||12;
+    const explicit=layoutFits(savedPlan,width,available,gap)?savedPlan:null;
+    grid.classList.toggle('visual-layout-reflow',Boolean(savedPlan&&!explicit));
     const geometry=screenGeometry(width,available,overview,window.innerWidth>viewport);
-    if(singleRow){geometry.rows=1;geometry.cockpit=false;}
-    if(explicit)geometry.cockpit=false;
+    if(savedPlan)geometry.cockpit=false;
     const {columns,rows}=geometry;
     grid.style.setProperty('--screen-columns',String(columns));grid.style.setProperty('--screen-rows',String(rows));grid.style.setProperty('--screen-height',`${available}px`);
     const cards=[...grid.children].filter(el=>!el.hidden);
@@ -117,12 +144,7 @@ export function mountScreenFit(){
       if(card.classList.contains('screen-card-hidden'))continue;
       let button=card.querySelector(':scope > .fit-details');
       if(!button){button=document.createElement('button');button.type='button';button.className='fit-details';button.textContent='Details';button.setAttribute('aria-label','Show full '+(card.querySelector('h2')?.textContent||card.dataset.widget||'card')+' details');button.onclick=()=>details(card);card.append(button);}
-      card.classList.toggle('fit-micro',card.clientHeight<170);
-      // A summary never relies on clipped overflow. The original live content remains in Details.
-      card.classList.remove('fit-summary','fit-tight');
-      if(card.scrollHeight>card.clientHeight+2)card.classList.add('fit-summary');
-      if(card.scrollHeight>card.clientHeight+2)card.classList.add('fit-tight');
-      if(card.scrollHeight>card.clientHeight+2&&(rows>1||cockpitFront)&&!singleRow&&!explicit){singleRow=true;schedule();}
+      fitCard(card);
       for(const frame of card.querySelectorAll('iframe')){
         if(card.clientHeight<270&&frame.src.startsWith('https://www.youtube-nocookie.com/')){frame.dataset.deferredSrc=frame.src;frame.removeAttribute('src');}
         else if(card.clientHeight>=270&&frame.dataset.deferredSrc){frame.src=frame.dataset.deferredSrc;delete frame.dataset.deferredSrc;}
@@ -136,9 +158,10 @@ export function mountScreenFit(){
   const touchStart=e=>{start=e.target.closest('input,textarea,select,button,a,dialog,[data-widget="stack"]')?null:{x:e.changedTouches[0].screenX,y:e.changedTouches[0].screenY};};
   const touchEnd=e=>{if(!start)return;const dx=e.changedTouches[0].screenX-start.x,dy=e.changedTouches[0].screenY-start.y;start=null;if(Math.abs(dx)>70&&Math.abs(dx)>Math.abs(dy)*1.8&&move(dx<0?1:-1))e.stopImmediatePropagation();};
   window.addEventListener('keydown',key,true);app.addEventListener('touchstart',touchStart,{capture:true,passive:true});app.addEventListener('touchend',touchEnd,{capture:true,passive:true});
-  const observer=new MutationObserver(schedule);observer.observe(grid,{childList:true,subtree:true,attributes:true,attributeFilter:['hidden']});
+  const observer=new MutationObserver(records=>{if(records.some(r=>!r.target.closest?.('.tile-compact-view')))schedule();});observer.observe(grid,{childList:true,subtree:true,characterData:true,attributes:true,attributeFilter:['hidden']});
+  grid.addEventListener('load',schedule,true);
   const resize=new ResizeObserver(schedule);resize.observe(app);window.addEventListener('resize',schedule);window.visualViewport?.addEventListener('resize',schedule);
   update();
   fullscreenChange();
-  return ()=>{active=false;restoreDetails();cancelAnimationFrame(frame);observer.disconnect();resize.disconnect();dialog.removeEventListener('close',closeDetails);modalContent.removeEventListener('click',detailClick,true);window.removeEventListener('resize',schedule);window.visualViewport?.removeEventListener('resize',schedule);document.removeEventListener('fullscreenchange',fullscreenChange);window.removeEventListener('keydown',key,true);app.removeEventListener('touchstart',touchStart,true);app.removeEventListener('touchend',touchEnd,true);fullscreen.remove();toggle.remove();pager.remove();document.body.classList.remove('screen-fit','cockpit-layout','cockpit-front');document.documentElement.style.removeProperty('--viewport-height');for(const card of original){card.classList.remove('screen-card-hidden','fit-summary','fit-tight','fit-micro');card.querySelector(':scope > .fit-details')?.remove();}for(const el of grid.querySelectorAll('.screen-item-hidden'))el.classList.remove('screen-item-hidden');for(const controls of listPagers.values())controls.remove();};
+  return ()=>{active=false;restoreDetails();cancelAnimationFrame(frame);observer.disconnect();resize.disconnect();grid.removeEventListener('load',schedule,true);dialog.removeEventListener('close',closeDetails);modalContent.removeEventListener('click',detailClick,true);window.removeEventListener('resize',schedule);window.visualViewport?.removeEventListener('resize',schedule);document.removeEventListener('fullscreenchange',fullscreenChange);window.removeEventListener('keydown',key,true);app.removeEventListener('touchstart',touchStart,true);app.removeEventListener('touchend',touchEnd,true);fullscreen.remove();toggle.remove();pager.remove();document.body.classList.remove('screen-fit','cockpit-layout','cockpit-front');document.documentElement.style.removeProperty('--viewport-height');for(const card of original){card.classList.remove('screen-card-hidden','fit-summary','fit-tight','fit-micro','tile-minimal');card.style.removeProperty('--tile-scale');card.querySelector(':scope > .fit-details')?.remove();card.querySelector(':scope > .tile-compact-view')?.remove();}for(const el of grid.querySelectorAll('.screen-item-hidden'))el.classList.remove('screen-item-hidden');for(const controls of listPagers.values())controls.remove();};
 }
