@@ -1,4 +1,4 @@
-# Orbit � Server Monitoring & Functions Dashboard
+# Orbit · Server Monitoring & Functions Dashboard
 
 A private, PhoneBox-inspired control center. Responsive phone/tablet/desktop layouts and swipeable Overview, Proxmox, Hestia, Cloudflare, Hostinger, Media, Activity and Connections pages. Original implementation; no PhoneBox source or assets copied.
 
@@ -69,7 +69,13 @@ node --check public/app.js
 
 Tests cover private routes, login/origin safeguards, 90-day cookies, CSRF, confirmation, GET mutation restrictions, failed-action auditing, webhook signing/deduplication, secret exposure and logout. Live credentials are absent: validate read-only calls first, then use disposable resources to verify mutations.
 
-Phase one is not production-verified against your services. Remaining: actual provider payload validation, account management/MFA/recovery, provider task tracking, scheduled monitoring, a pfSense collector matched to your installation, and a widget layout editor.
+Phase one is not production-verified against your services. Remaining: actual provider payload validation, account management/MFA/recovery, provider task tracking, scheduled monitoring, and a pfSense collector matched to your installation.
+
+## Customizable overview and host statistics
+
+Use **Customize** on Overview to show or hide widgets, move them up/down, and choose compact, half-width, or full-width cards. Cards stack on phones and use two columns on tablets. The layout, selected Proxmox node, and refresh interval are saved per account in SQLite and follow the user across browsers. **Reset layout** restores defaults when saved. Existing databases gain the preferences table automatically at startup.
+
+Proxmox cards show selected host CPU usage/model/core count, memory and swap, uptime, load averages, root filesystem usage, storage pools, and CT/VM counts. Select the host from **Server**. Metrics refresh every 30 seconds by default, with manual/15/30/60-second options. Polling pauses when the browser tab is hidden and stops when leaving Overview. Failed polls mark previously displayed values as stale; storage errors do not discard available CPU/memory stats. Demo values are explicitly labeled. Host metrics need read access to `/nodes`, `/nodes/{node}/status`, `/nodes/{node}/storage` and `/cluster/resources`.
 
 ## References
 
