@@ -1,5 +1,11 @@
 const definitions=[['cpu','CPU usage',4],['memory','Memory & swap',4],['health','Server health',4],['storage','Storage pools',6],['guests','Containers & VMs',6],['clock','Clock',4],['weather','Weather',4],['infrastructure','Infrastructure',4],['network','Network',6],['music','Music',6],['stripe','Stripe events',4],['movies','Movies',4],['launch','Quick launch',4]];
-export const defaultLayout=()=>({node:'',refresh:30,widgets:definitions.map(([id,,width])=>({id,width,visible:true}))});
+export const defaultLayout=()=>({node:'',refresh:30,musicPlaylist:'',widgets:[definitions.find(d=>d[0]==='music'),...definitions.filter(d=>d[0]!=='music')].map(([id,,width])=>({id,width,visible:true}))});
+export function playlistId(input){
+  const value=String(input||'').trim();if(!value)return '';
+  if(/^[-\w]{8,150}$/.test(value))return value;
+  try{const url=new URL(value);if(url.protocol!=='https:'||!['youtube.com','www.youtube.com','music.youtube.com','youtu.be'].includes(url.hostname))throw Error();const id=url.searchParams.get('list');if(/^[-\w]{8,150}$/.test(id||''))return id;}catch{}
+  throw Error('Paste a YouTube or YouTube Music playlist link containing list=, or a playlist ID.');
+}
 const numeric=value=>value!==null&&value!==undefined&&value!==''&&Number.isFinite(Number(value));
 const bytes=value=>numeric(value)?`${(Number(value)/1073741824).toFixed(1)} GiB`:'Unavailable';
 const percent=(used,total)=>numeric(used)&&numeric(total)&&Number(total)>0?Math.min(100,Math.max(0,Number(used)/Number(total)*100)):null;
@@ -25,6 +31,17 @@ export function mountDashboard({api,esc,connected,demo,openModal,toast}){
     for(const widget of layout.widgets){const el=cards.get(widget.id);if(!el)continue;el.hidden=!widget.visible;el.classList.remove('span3','span4','span5','span6','span7','span8','span12');el.classList.add(`span${widget.width}`);grid.append(el);}
     if(!layout.widgets.some(w=>w.visible))updated.textContent='All widgets are hidden. Choose Customize to add them back.';
   };
+  function music(){
+    const card=cards.get('music');card.innerHTML=`<div class="card-head"><h2>YouTube Music</h2><button type="button" class="small-button" id="connect-music">${layout.musicPlaylist?'Change playlist':'Connect playlist'}</button></div><div id="music-player"></div><a class="subtle" href="https://music.youtube.com/" target="_blank" rel="noreferrer">Open YouTube Music</a>`;
+    const player=card.querySelector('#music-player');
+    if(layout.musicPlaylist){const frame=document.createElement('iframe');frame.src='https://www.youtube-nocookie.com/embed/videoseries?'+new URLSearchParams({list:layout.musicPlaylist,playsinline:'1',autoplay:'0'});frame.title='YouTube playlist player';frame.allow='encrypted-media; fullscreen; picture-in-picture';frame.allowFullscreen=true;frame.referrerPolicy='strict-origin-when-cross-origin';frame.className='music-player';player.append(frame);}
+    else player.innerHTML='<p>Your music, on the first screen.</p><p class="subtle">Connect a public or unlisted playlist to play here. No API key required.</p>';
+    card.querySelector('#connect-music').onclick=()=>{
+      openModal('<h1>Connect your playlist</h1><p>In YouTube Music, open a playlist, choose Share, then Copy link. Use a public or unlisted playlist.</p><form id="music-connect-form"><label>Playlist link or ID<input name="playlist" placeholder="https://music.youtube.com/playlist?list=..."></label><p class="subtle">This uses the YouTube embedded player. It does not sign into your YouTube Music account. Some tracks or playlists may not allow embedded playback.</p><button class="primary" type="submit">Save playlist</button><p class="error" role="alert"></p></form>');
+      const form=document.querySelector('#music-connect-form');form.elements.playlist.value=layout.musicPlaylist||'';
+      form.onsubmit=async e=>{e.preventDefault();const button=form.querySelector('button');button.disabled=true;try{const id=playlistId(form.elements.playlist.value);await save({...layout,musicPlaylist:id,widgets:[{...layout.widgets.find(w=>w.id==='music'),visible:true},...layout.widgets.filter(w=>w.id!=='music')]});if(active){music();form.closest('dialog').close();toast('Playlist saved. Press Play to start.');}}catch(error){form.querySelector('.error').textContent=error.message;}finally{button.disabled=false;}};
+    };
+  }
   const meter=(value)=>value===null?'':`<progress class="host-progress" max="100" value="${value.toFixed(1)}" aria-label="Usage ${value.toFixed(1)} percent"></progress>`;
   async function refreshNetwork(){
     if(!active||demo||networkBusy||document.hidden||cards.get('network').hidden||!connected('pfsense'))return;
@@ -49,6 +66,15 @@ export function mountDashboard({api,esc,connected,demo,openModal,toast}){
       set('cpu',`<div class="metric mono">${cpu===null?'Unavailable':cpu.toFixed(1)+'<small>%</small>'}</div>${meter(cpu)}<p>${esc(s.cpuinfo?.cpus??selected?.maxcpu??'Unknown')} logical CPUs</p><p class="subtle">${esc(s.cpuinfo?.model||'')}</p>`);
       set('memory',`<div class="metric mono">${memory===null?'Unavailable':memory.toFixed(1)+'<small>%</small>'}</div>${meter(memory)}<p>${bytes(s.memory?.used)} / ${bytes(s.memory?.total)}</p><div class="divider"></div><div class="flex"><span class="subtle">Swap</span><strong>${Number(s.swap?.total)===0?'Disabled':swap===null?'Unavailable':swap.toFixed(1)+'%'}</strong></div><p class="subtle">${bytes(s.swap?.used)} / ${bytes(s.swap?.total)}</p>`);
       set('health',`<span class="status"><i class="dot"></i>${online?'Online':'Unknown'}</span><dl class="data-list"><dt>Server</dt><dd>${esc(data.node)}</dd><dt>Uptime</dt><dd>${uptime(s.uptime)}</dd><dt>Load (1 / 5 / 15 min)</dt><dd>${esc(Array.isArray(s.loadavg)?s.loadavg.join(' / '):'Unavailable')}</dd><dt>Proxmox</dt><dd>${esc(s.pveversion||'Unavailable')}</dd><dt>Root filesystem</dt><dd>${bytes(s.rootfs?.used)} / ${bytes(s.rootfs?.total)}</dd></dl>`);
+    }
+    if(s){
+      const temperatures=data.sensors?.temperatures||[],fans=data.sensors?.fans||[];
+      const temp=temperatures.length?Math.max(...temperatures.map(r=>r.celsius)).toFixed(1)+' °C':'--';
+      const fan=fans.length?Math.max(...fans.map(r=>r.rpm)).toFixed(0)+' RPM':'--';
+      const badges=document.createElement('div');badges.className='sensor-badges';
+      badges.innerHTML=`<button type="button" class="sensor-badge" aria-label="Server temperatures" title="Highest reported temperature">&#127777; ${temp}</button><button type="button" class="sensor-badge" aria-label="Server fan speeds" title="Highest reported fan speed">&#10051; ${fan}</button>`;
+      badges.onclick=()=>openModal(`<h2>Hardware sensors</h2><p class="subtle">${esc(data.node)} &middot; Readings from the physical host</p>${temperatures.length||fans.length?`<dl class="data-list">${temperatures.map(r=>`<dt>${esc(r.label)}</dt><dd>${r.celsius.toFixed(1)} °C</dd>`).join('')}${fans.map(r=>`<dt>${esc(r.label)}</dt><dd>${r.rpm.toFixed(0)} RPM</dd>`).join('')}</dl>`:'<p>No sensor readings available. Configure the host sensor collector described in the README. Fan readings require hardware and drivers that expose RPM.</p>'}`);
+      cards.get('health').querySelector('.host-metric').append(badges);
     }
     set('storage',Array.isArray(data.storage)&&data.storage.length?data.storage.map(pool=>{
       const usage=percent(pool.used,pool.total),available=pool.active===1||pool.active===true;
@@ -89,10 +115,10 @@ export function mountDashboard({api,esc,connected,demo,openModal,toast}){
     const paint=()=>{list.innerHTML=draft.widgets.map((w,i)=>`<div class="layout-widget"><label class="check"><input type="checkbox" data-id="${w.id}" ${w.visible?'checked':''}>${definitions.find(d=>d[0]===w.id)[1]}</label><div class="layout-widget-controls"><select aria-label="${definitions.find(d=>d[0]===w.id)[1]} width" data-width="${w.id}"><option value="4" ${w.width===4?'selected':''}>Compact</option><option value="6" ${w.width===6?'selected':''}>Half width</option><option value="12" ${w.width===12?'selected':''}>Full width</option></select><button type="button" class="small-button" data-move="${i}" data-direction="-1" aria-label="Move ${w.id} up" ${i===0?'disabled':''}>Up</button><button type="button" class="small-button" data-move="${i}" data-direction="1" aria-label="Move ${w.id} down" ${i===draft.widgets.length-1?'disabled':''}>Down</button></div></div>`).join('');};paint();
     list.onchange=e=>{const w=draft.widgets.find(w=>w.id===(e.target.dataset.id||e.target.dataset.width));if(w){if(e.target.dataset.id)w.visible=e.target.checked;else w.width=Number(e.target.value);}};
     list.onclick=e=>{const button=e.target.closest('button[data-move]');if(!button)return;const i=Number(button.dataset.move),j=i+Number(button.dataset.direction);[draft.widgets[i],draft.widgets[j]]=[draft.widgets[j],draft.widgets[i]];paint();list.querySelector(`[data-move="${j}"][data-direction="${button.dataset.direction}"]`)?.focus();};
-    form.querySelector('#dashboard-reset').onclick=()=>{draft=defaultLayout();form.elements.refresh.value='30';paint();};
+    form.querySelector('#dashboard-reset').onclick=()=>{draft={...defaultLayout(),musicPlaylist:layout.musicPlaylist||''};form.elements.refresh.value='30';paint();};
     form.onsubmit=async e=>{e.preventDefault();if(saving||!active)return;saving=true;const button=form.querySelector('[type=submit]');button.disabled=true;try{draft.refresh=Number(form.elements.refresh.value);await save(draft);if(active){form.closest('dialog').close();toast(demo?'Demo layout updated for this visit.':'Dashboard layout saved.');lastSuccess=null;refreshNetwork();await refresh();}}catch(error){form.querySelector('.error').textContent=error.message;}finally{saving=false;button.disabled=false;}};
   };
   const onVisible=()=>{if(!document.hidden){refresh();refreshNetwork();}};document.addEventListener('visibilitychange',onVisible);
-  (async()=>{try{if(!demo){const stored=await api('dashboard');if(!active)return;if(Array.isArray(stored.widgets)&&stored.widgets.length===definitions.length)layout=stored;}}catch(error){if(active)toast('Could not load saved layout: '+error.message);}if(active){apply();schedule();refresh();refreshNetwork();if(!demo)networkTimer=setInterval(refreshNetwork,5000);}})();
+  (async()=>{try{if(!demo){const stored=await api('dashboard');if(!active)return;if(Array.isArray(stored.widgets)&&stored.widgets.length===definitions.length){layout=stored;if(layout.musicPlaylist===undefined){layout.musicPlaylist='';layout.widgets=[{...layout.widgets.find(w=>w.id==='music'),visible:true},...layout.widgets.filter(w=>w.id!=='music')];}}}}catch(error){if(active)toast('Could not load saved layout: '+error.message);}if(active){music();apply();schedule();refresh();refreshNetwork();if(!demo)networkTimer=setInterval(refreshNetwork,5000);}})();
   return ()=>{active=false;clearInterval(timer);clearInterval(networkTimer);document.removeEventListener('visibilitychange',onVisible);};
 }
