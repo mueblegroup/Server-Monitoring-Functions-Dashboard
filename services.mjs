@@ -20,7 +20,14 @@ async function request(base,path,headers={},method='GET',data,form=false){
     throw error(`${u.host}: ${hint}${code?` (${code})`:''}`);
   }
   if(r.status>=300&&r.status<400)throw error(`${u.host} redirected the API request (HTTP ${r.status}). Use the panel API origin, not a login page or access-portal URL.`);
-  if(!r.ok)throw error(`${u.host} rejected ${method} ${path} (HTTP ${r.status}). ${[401,403].includes(r.status)?'Check API credentials, permissions, IP allowlists and access policies.':r.status===404?'Check the base URL and panel port.':'Check the service or reverse proxy.'}`);
+  if(!r.ok){
+    let detail='';
+    // Proxmox sends the actual failure reason in its JSON message. Never forward HTML pages.
+    if(path.startsWith('/api2/json/')&&/application\/json/i.test(r.headers.get('content-type')||'')){
+      try{const body=await r.json();if(typeof body?.message==='string')detail=body.message.replace(/[\x00-\x1f\x7f]/g,' ').slice(0,400);}catch{}
+    }
+    throw error(`${u.host} rejected ${method} ${path} (HTTP ${r.status}). ${detail||([401,403].includes(r.status)?'Check API credentials, permissions, IP allowlists and access policies.':r.status===404?'Check the base URL and panel port.':'Check the service or reverse proxy.')}`);
+  }
   const text=await r.text();let value;
   try{value=text?JSON.parse(text):null;}catch{throw error(`${u.host} returned ${/^\s*</.test(text)?'HTML':'non-JSON content'} instead of API JSON. Check the panel base URL/port and any proxy or Cloudflare Access policy. Proxmox uses /api2/json; Hestia uses /api/. Do not put those paths in the base URL.`);}
   if(value?.success===false||value?.error)throw error(`${u.host} reported an API error. Check service permissions and configuration.`);return value;
