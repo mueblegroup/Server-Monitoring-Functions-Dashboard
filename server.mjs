@@ -27,6 +27,8 @@ const origin = process.env.PUBLIC_ORIGIN || 'http://localhost:3000';
 const secure = process.env.COOKIE_SECURE === 'true';
 const cookie = (value,age) => `orbit=${value}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${age}${secure?'; Secure':''}`;
 const files = {'/':['public/index.html','text/html'], '/app.js':['public/app.js','text/javascript'], '/dashboard.mjs':['public/dashboard.mjs','text/javascript'], '/response.mjs':['public/response.mjs','text/javascript'], '/style.css':['public/style.css','text/css'], '/manifest.webmanifest':['public/manifest.webmanifest','application/manifest+json'], '/icon.svg':['public/icon.svg','image/svg+xml']};
+files['/screens.mjs']=['public/screens.mjs','text/javascript'];
+files['/screens.css']=['public/screens.css','text/css'];
 async function body(req) {
   const chunks=[]; let size=0;
   for await (const chunk of req) { size+=chunk.length; if(size>65536) throw Object.assign(new Error('Request too large'),{status:413}); chunks.push(chunk); }
