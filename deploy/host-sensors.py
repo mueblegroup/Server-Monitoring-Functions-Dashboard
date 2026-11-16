@@ -11,20 +11,22 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 def read_sensors(root=Path('/sys/class/hwmon')):
     result = {'node': os.environ.get('SENSOR_NODE', socket.gethostname().split('.')[0]),
-              'temperatures': [], 'fans': []}
+              'temperatures': [], 'fans': [], 'power': []}
     for device in sorted(root.glob('hwmon*')):
         try:
             chip = (device / 'name').read_text().strip()
         except OSError:
             chip = device.name
         for pattern, key, unit, scale in [('temp*_input', 'temperatures', 'celsius', 1000),
-                                           ('fan*_input', 'fans', 'rpm', 1)]:
+                                           ('fan*_input', 'fans', 'rpm', 1),
+                                           ('power*_input', 'power', 'watts', 1000000),
+                                           ('power*_average', 'power', 'watts', 1000000)]:
             for sensor in sorted(device.glob(pattern)):
                 try:
                     number = float(sensor.read_text().strip()) / scale
                     label_file = sensor.with_name(sensor.name.replace('_input', '_label'))
                     label = label_file.read_text().strip() if label_file.exists() else sensor.stem.replace('_input', '')
-                    if (unit == 'celsius' and -50 <= number <= 200) or (unit == 'rpm' and 0 <= number <= 100000):
+                    if (unit == 'celsius' and -50 <= number <= 200) or (unit in ('rpm', 'watts') and 0 <= number <= 100000):
                         result[key].append({'label': f'{chip}: {label}', unit: number})
                 except (OSError, ValueError):
                     continue
@@ -43,11 +45,19 @@ def read_sensors(root=Path('/sys/class/hwmon')):
                 label = 'IPMI: ' + fields[0][:80]
                 unit = fields[2].lower()
                 if unit == 'degrees c' and -50 <= value <= 200:
-                    result['temperatures'].append({'label': label, 'celsius': value})
+                    row = {'label': label, 'celsius': value}
+                    if len(fields) > 7:
+                        try:
+                            row['warningCelsius'] = float(fields[7])
+                        except ValueError:
+                            pass
+                    result['temperatures'].append(row)
                 elif unit == 'rpm' and 0 <= value <= 100000:
                     result['fans'].append({'label': label, 'rpm': value})
                 elif unit in ('percent', '%') and 'fan' in fields[0].lower() and 0 <= value <= 100:
                     result['fans'].append({'label': label, 'percent': value})
+                elif unit == 'watts' and 0 <= value <= 100000:
+                    result['power'].append({'label': label, 'watts': value})
         except (OSError, subprocess.SubprocessError):
             pass  # hwmon still works when IPMI is unavailable or access is denied.
     return result

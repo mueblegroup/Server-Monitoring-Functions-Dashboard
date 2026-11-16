@@ -1,3 +1,4 @@
+import {defaultExperience} from '../public/experience-data.mjs';
 import {test,before,after} from 'node:test';
 import assert from 'node:assert/strict';
 import {Readable} from 'node:stream';
@@ -64,5 +65,18 @@ test('Personal pages and bills require authentication and CSRF and persist valid
  assert.deepEqual(await (await request('workspace')).json(),workspace);
  assert.equal((await request('workspace','POST',{pages:[],bills:[{id:'invalid'}]},{'X-CSRF-Token':csrf})).status,400);
  assert.equal((await request('jellyfin/image?id=..%2F..&kind=Backdrop')).status,400);
+});
+test('Display settings, monitoring history and workflow triggers enforce session and CSRF',async()=>{
+ assert.equal((await request('operations','GET',undefined,{Cookie:''})).status,401);
+ assert.equal((await request('power','GET',undefined,{Cookie:''})).status,401);
+ assert.equal((await request('experience','POST',defaultExperience())).status,403);
+ assert.equal((await request('experience','POST',defaultExperience(),{'X-CSRF-Token':csrf})).status,200);
+ assert.deepEqual(await (await request('experience')).json(),defaultExperience());
+ assert.equal((await request('automation/run','POST',{id:'x',confirm:'x'})).status,403);
+ assert.equal((await request('automation/run','POST',{id:'x'},{'X-CSRF-Token':csrf})).status,400);
+ process.env.ORBIT_AUTOMATIONS=JSON.stringify([{id:'job',name:'Job',url:'https://workflow.example',callbackToken:'a'.repeat(32)}]);
+ assert.equal((await request('automation-events/job','POST',{status:'success',summary:'Done'},{Authorization:'Bearer wrong',Cookie:''})).status,401);
+ assert.equal((await request('automation-events/job','POST',{status:'success',summary:'Done'},{Authorization:'Bearer '+'a'.repeat(32),Cookie:'',Origin:undefined})).status,200);
+ assert.equal((await (await request('operations')).json()).actions[0].result.status,'success');delete process.env.ORBIT_AUTOMATIONS;
 });
 test('logout invalidates session immediately',async()=>{assert.equal((await request('logout','POST',{}, {'X-CSRF-Token':csrf})).status,200);assert.equal((await request('session')).status,401);});

@@ -1,8 +1,9 @@
+import {mountExperience,extraTiles} from './experience.mjs';
 import {loadingState} from './motion.mjs';
 import {personalWorkspace,renderBills,renderHostinger,renderMovies} from './personal.mjs';
 import {mountSpotify} from './spotify-player.mjs';
 import {sampleTrend,sparkline} from './trends.mjs';
-const definitions=[['cpu','CPU usage',4],['memory','Memory & swap',4],['health','Server health',4],['storage','Storage pools',6],['guests','Containers & VMs',6],['clock','Clock',4],['weather','Weather',4],['infrastructure','Infrastructure',4],['network','Network',6],['music','Music',6],['codex','OpenAI Codex usage',6],['stripe','Stripe events',4],['movies','Movies',4],['launch','Quick launch',4],['bills','Recurring bills',6],['hostinger','Hostinger billing',6]];
+const definitions=[['cpu','CPU usage',4],['memory','Memory & swap',4],['health','Server health',4],['storage','Storage pools',6],['guests','Containers & VMs',6],['clock','Clock',4],['weather','Weather',4],['infrastructure','Infrastructure',4],['network','Network',6],['music','Music',6],['codex','OpenAI Codex usage',6],['stripe','Stripe events',4],['movies','Movies',4],['launch','Quick launch',4],['bills','Recurring bills',6],['hostinger','Hostinger billing',6],...extraTiles];
 const front=['clock','music','movies','cpu','memory','health','network'];
 const initialOrder=[...front,'codex'];
 export const defaultLayout=()=>({node:'',refresh:30,musicPlaylist:'',cockpitVersion:1,widgets:[...initialOrder.map(id=>definitions.find(d=>d[0]===id)),...definitions.filter(d=>!initialOrder.includes(d[0]))].map(([id,,width])=>({id,width,visible:true}))});
@@ -19,10 +20,10 @@ const uptime=value=>{if(!numeric(value))return 'Unavailable';const h=Math.floor(
 export function mountDashboard({api,esc,connected,demo,openModal,toast,customPageId=null}){
   const grid=document.querySelector('#app > .grid');
   if(!grid)return ()=>{};
-  let active=true,timer,networkTimer,quotaTimer,quotaBusy=false,networkBusy=false,busy=false,layout=defaultLayout(),latest=null,lastSuccess=null,saving=false;
+  let active=true,timer,networkTimer,quotaTimer,quotaBusy=false,networkBusy=false,busy=false,layout=defaultLayout(),latest=null,lastSuccess=null,saving=false,experience=null,networkData=null;
   const cards=new Map();
   grid.dataset.customPage=customPageId||'';
-  const personal=personalWorkspace({api,esc,openModal,toast,definitions,demo,changed:()=>{if(active){apply();renderBills(cards.get('bills'),personal.data.bills,esc,()=>personal.bills());}}});
+  const personal=personalWorkspace({api,esc,openModal,toast,definitions,demo,changed:()=>{if(active){apply();experience?.update();renderBills(cards.get('bills'),personal.data.bills,esc,()=>personal.bills());}}});
   const existing=['clock','weather','infrastructure','network','music','stripe','movies','launch'];
   [...grid.children].forEach((el,index)=>{el.dataset.widget=existing[index];cards.set(existing[index],el);});
   const weather=cards.get('weather').querySelector('#weather');
@@ -34,7 +35,7 @@ export function mountDashboard({api,esc,connected,demo,openModal,toast,customPag
     cards.set(id,el);grid.append(el);
   }
   const quotaCard=document.createElement('section');quotaCard.className='card span6';quotaCard.dataset.widget='codex';quotaCard.innerHTML='<div class="card-head"><h2>OpenAI Codex</h2><span class="label">USAGE LIMITS</span></div><div class="quota-body">Connect the Codex CLI to see account usage.</div>';cards.set('codex',quotaCard);grid.append(quotaCard);
-  for(const id of ['bills','hostinger']){const card=document.createElement('section');card.className='card span6';card.dataset.widget=id;card.innerHTML='<h2>'+definitions.find(d=>d[0]===id)[1]+'</h2>'+loadingState('Loading');cards.set(id,card);grid.append(card);}
+  for(const id of ['bills','hostinger',...extraTiles.map(t=>t[0])]){const card=document.createElement('section');card.className='card span6';card.dataset.widget=id;card.innerHTML='<h2>'+definitions.find(d=>d[0]===id)[1]+'</h2>'+loadingState('Loading');cards.set(id,card);grid.append(card);}
   async function refreshQuota(){
     if(!active||demo||quotaBusy||document.hidden||quotaCard.hidden)return;quotaBusy=true;
     const body=quotaCard.querySelector('.quota-body');
@@ -56,11 +57,13 @@ export function mountDashboard({api,esc,connected,demo,openModal,toast,customPag
   const nodeSelect=toolbar.querySelector('select'),updated=toolbar.querySelector('#metrics-updated');
   const apply=()=>{
     toolbar.querySelector('.eyebrow').textContent=customPageId==='usage'?'OPENAI USAGE':customPageId==='billing'?'BILLING':customPageId?(personal.data.pages.find(p=>p.id===customPageId)?.title||'Page unavailable'):'YOUR DASHBOARD';
-    const selected=customPageId==='usage'?[{id:'codex',width:12,visible:true}]:customPageId==='billing'?[{id:'hostinger',width:6,visible:true},{id:'bills',width:6,visible:true}]:customPageId?personal.data.pages.find(p=>p.id===customPageId)?.widgets||[]:layout.widgets;
+    experience?.decorate();
+    const explicit=experience?.plan();
+    const selected=explicit?explicit.map(p=>({id:p.id,width:Math.min(12,Math.max(4,p.w)),visible:true})):customPageId==='usage'?[{id:'codex',width:12,visible:true}]:customPageId==='billing'?[{id:'hostinger',width:6,visible:true},{id:'bills',width:6,visible:true}]:customPageId?personal.data.pages.find(p=>p.id===customPageId)?.widgets||[]:layout.widgets;
     if(weather){const target=selected.some(w=>w.id==='weather'&&w.visible)&&!selected.some(w=>w.id==='clock'&&w.visible)?cards.get('weather'):cards.get('clock');if(weather.parentElement!==target)target.append(weather);}
     for(const card of cards.values())card.hidden=true;
     for(const widget of selected){const el=cards.get(widget.id);if(!el)continue;el.hidden=!widget.visible;el.classList.remove('span3','span4','span5','span6','span7','span8','span12');el.classList.add(`span${widget.width}`);grid.append(el);}
-    if(!layout.widgets.some(w=>w.visible))updated.textContent='All widgets are hidden. Choose Customize to add them back.';
+    if(!selected.some(w=>w.visible))updated.textContent='All widgets are hidden. Choose Customize to add them back.';
   };
   let disposeMusic=()=>{};
   function music(){disposeMusic();disposeMusic=mountSpotify(cards.get('music'),{api,toast,openModal,demo,onYouTube:()=>{disposeMusic();youtubeMusic();}});}
@@ -81,7 +84,7 @@ export function mountDashboard({api,esc,connected,demo,openModal,toast,customPag
     if(!active||demo||networkBusy||document.hidden||cards.get('network').hidden||!connected('pfsense'))return;
     networkBusy=true;
     try{
-      const {data}=await api('pfsense');if(!active)return;
+      const {data}=await api('pfsense');if(!active)return;networkData=data;experience?.update();
       const rate=value=>numeric(value)?Number(value).toFixed(2):'--';
       const body=cards.get('network').querySelector('#network-metrics');
       body.innerHTML=`<div class="flex"><span class="mono">${esc(data.interface||'WAN')}</span><span class="status ${data.interfaceStatus==='up'?'':'off'}">${esc(data.interfaceStatus||'Connected')}</span></div><div class="network-values"><div><span class="subtle">Download</span><div class="metric mono">${rate(data.downloadMbps)}<small>Mbps</small></div></div><div><span class="subtle">Upload</span><div class="metric mono">${rate(data.uploadMbps)}<small>Mbps</small></div></div></div>${data.warmingUp?'<p class="subtle">Sampling traffic. Rates appear after the next refresh.</p>':''}<dl class="data-list"><dt>CPU (SNMP)</dt><dd>${numeric(data.cpuPercent)?Number(data.cpuPercent).toFixed(1)+'%':'Unavailable'}</dd><dt>Memory</dt><dd>${data.memory?Number(data.memory.percent).toFixed(1)+'% ('+bytes(data.memory.usedBytes)+' / '+bytes(data.memory.totalBytes)+')':'Unavailable'}</dd><dt>Firewall uptime</dt><dd>${uptime(data.uptimeSeconds)}</dd></dl><p class="subtle">${data.updatedAt?'Updated '+esc(new Date(data.updatedAt).toLocaleTimeString()):'Live collector'} &middot; refreshes every 5 seconds</p>`;
@@ -93,7 +96,7 @@ export function mountDashboard({api,esc,connected,demo,openModal,toast,customPag
   }
   const set=(id,html)=>{cards.get(id).querySelector('.host-metric').innerHTML=html;};
   function show(data){
-    latest=data;const s=data.stats,selected=data.nodes.find(n=>n.node===data.node),online=selected?.status==='online';
+    latest=data;experience?.update();const s=data.stats,selected=data.nodes.find(n=>n.node===data.node),online=selected?.status==='online';
     const clockStatus=cards.get('clock').querySelector('.status');if(clockStatus)clockStatus.textContent=`${data.node||'No host'} · ${online?'Online':'Offline'}`;
     const options=data.nodes.map(n=>`<option value="${esc(n.node)}">${esc(n.node)}${n.status==='online'?'':' (offline)'}</option>`).join('');
     nodeSelect.innerHTML=options||'<option value="">No servers found</option>';nodeSelect.value=data.node||'';
@@ -153,7 +156,7 @@ export function mountDashboard({api,esc,connected,demo,openModal,toast,customPag
     try{await save({...layout,node:nodeSelect.value});lastSuccess=null;await refresh();}
     catch(error){layout.node=previous;nodeSelect.value=previous||latest?.node||'';toast(error.message);}
   };
-  toolbar.querySelector('#dashboard-customize').onclick=()=>{
+  toolbar.querySelector('#dashboard-customize').onclick=()=>{if(experience?.plan()){experience.edit();return;}
     let draft=structuredClone(layout);
     if(customPageId){const selected=customPageId==='usage'?[{id:'codex',width:12,visible:true}]:customPageId==='billing'?[{id:'hostinger',width:6,visible:true},{id:'bills',width:6,visible:true}]:personal.data.pages.find(p=>p.id===customPageId)?.widgets||[];draft.widgets=[...selected,...layout.widgets.filter(w=>!selected.some(s=>s.id===w.id)).map(w=>({...w,visible:false}))];}
     openModal('<div class="eyebrow">MAKE IT YOURS</div><h1>Customize dashboard</h1><p>Show, resize, and reorder your widgets. Layout follows your account across devices.</p><form id="dashboard-layout-form"><div id="dashboard-layout-list"></div><label class="dashboard-refresh-label">Refresh host stats<select name="refresh"><option value="0">Manually</option><option value="15">Every 15 seconds</option><option value="30">Every 30 seconds</option><option value="60">Every 60 seconds</option></select></label><div class="actions"><button class="primary" type="submit">Save layout</button><button class="small-button" type="button" id="dashboard-reset">Reset layout</button></div><p class="error" role="alert"></p></form>');
@@ -164,10 +167,11 @@ export function mountDashboard({api,esc,connected,demo,openModal,toast,customPag
     form.querySelector('#dashboard-reset').onclick=()=>{draft={...defaultLayout(),musicPlaylist:layout.musicPlaylist||''};form.elements.refresh.value='30';paint();};
     form.onsubmit=async e=>{e.preventDefault();if(saving||!active)return;saving=true;const button=form.querySelector('[type=submit]');button.disabled=true;try{draft.refresh=Number(form.elements.refresh.value);if(customPageId&&!['usage','billing'].includes(customPageId)){const widgets=draft.widgets.filter(w=>w.visible);if(!widgets.length)throw Error('Choose at least one tile');await personal.savePage(customPageId,widgets);await save({...layout,refresh:draft.refresh});}else await save(customPageId?{...layout,refresh:draft.refresh}:draft);if(active){form.closest('dialog').close();toast(demo?'Demo layout updated for this visit.':'Dashboard layout saved.');lastSuccess=null;refreshNetwork();await refresh();}}catch(error){form.querySelector('.error').textContent=error.message;}finally{saving=false;button.disabled=false;}};
   };
+  experience=mountExperience({api,esc,openModal,toast,cards,definitions,grid,personal,page:customPageId?(customPageId==='usage'||customPageId==='billing'?customPageId:'custom-'+customPageId):'overview',onChange:apply,getStats:()=>latest,getNetwork:()=>networkData,demo});
   const onVisible=()=>{if(!document.hidden){refresh();refreshNetwork();refreshQuota();}};document.addEventListener('visibilitychange',onVisible);
-  (async()=>{try{if(!demo){await personal.load();const stored=await api('dashboard');if(!active)return;if(Array.isArray(stored.widgets)&&stored.widgets.length>=13&&stored.widgets.length<=definitions.length){layout=stored;for(const [id,,width] of definitions)if(!layout.widgets.some(w=>w.id===id))layout.widgets.push({id,width,visible:true});if(!layout.widgets.some(w=>w.id==='codex'))layout.widgets.splice(6,0,{id:'codex',width:6,visible:true});if(layout.musicPlaylist===undefined)layout.musicPlaylist='';if(layout.cockpitVersion!==1){layout.cockpitVersion=1;layout.widgets=[...front.map(id=>({...layout.widgets.find(w=>w.id===id),visible:true})),...layout.widgets.filter(w=>!front.includes(w.id))];}}}}catch(error){if(active)toast('Could not load saved layout: '+error.message);}if(active){music();apply();renderBills(cards.get('bills'),personal.data.bills,esc,()=>personal.bills());
-      if(connected('hostinger')&&!demo)api('hostinger?view=billing').then(r=>{if(active)renderHostinger(cards.get('hostinger'),r.data,esc);}).catch(e=>{if(active)cards.get('hostinger').textContent=e.message;});else cards.get('hostinger').innerHTML='<h2>Hostinger billing</h2><p>Connect Hostinger to see renewal dates and amounts.</p>';
+  (async()=>{try{if(!demo){await personal.load();const stored=await api('dashboard');if(!active)return;if(Array.isArray(stored.widgets)&&stored.widgets.length>=13&&stored.widgets.length<=definitions.length){layout=stored;for(const [id,,width] of definitions)if(!layout.widgets.some(w=>w.id===id))layout.widgets.push({id,width,visible:true});if(!layout.widgets.some(w=>w.id==='codex'))layout.widgets.splice(6,0,{id:'codex',width:6,visible:true});if(layout.musicPlaylist===undefined)layout.musicPlaylist='';if(layout.cockpitVersion!==1){layout.cockpitVersion=1;layout.widgets=[...front.map(id=>({...layout.widgets.find(w=>w.id===id),visible:true})),...layout.widgets.filter(w=>!front.includes(w.id))];}}}}catch(error){if(active)toast('Could not load saved layout: '+error.message);}if(active){await experience.load();if(!active)return;music();apply();renderBills(cards.get('bills'),personal.data.bills,esc,()=>personal.bills());
+      if(connected('hostinger')&&!demo)api('hostinger?view=billing').then(r=>{if(active){renderHostinger(cards.get('hostinger'),r.data,esc);experience.hostinger(r.data);}}).catch(e=>{if(active)cards.get('hostinger').textContent=e.message;});else cards.get('hostinger').innerHTML='<h2>Hostinger billing</h2><p>Connect Hostinger to see renewal dates and amounts.</p>';
       if(connected('jellyfin')&&!demo)api('jellyfin').then(r=>{if(active)renderMovies(cards.get('movies'),r.data.Items||[],esc);}).catch(e=>{if(active)cards.get('movies').textContent=e.message;});
       schedule();refresh();refreshNetwork();refreshQuota();if(!demo){networkTimer=setInterval(refreshNetwork,5000);quotaTimer=setInterval(refreshQuota,60000);}}})();
-  return ()=>{active=false;disposeMusic();clearInterval(timer);clearInterval(networkTimer);clearInterval(quotaTimer);document.removeEventListener('visibilitychange',onVisible);};
+  return ()=>{active=false;experience?.dispose();disposeMusic();clearInterval(timer);clearInterval(networkTimer);clearInterval(quotaTimer);document.removeEventListener('visibilitychange',onVisible);};
 }

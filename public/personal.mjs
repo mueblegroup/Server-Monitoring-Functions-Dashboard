@@ -1,7 +1,8 @@
+let demoWorkspace={pages:[],bills:[]};
 import {billCycle,todayLocal,money,countdown,gauge} from './billing.mjs';
 export function personalWorkspace({api,esc,openModal,toast,definitions,changed,demo}){
-  let data={pages:[],bills:[]};
-  const save=async next=>{data=demo?next:await api('workspace',{method:'POST',body:JSON.stringify(next)});changed();};
+  let data=demo?structuredClone(demoWorkspace):{pages:[],bills:[]};
+  const save=async next=>{data=demo?next:await api('workspace',{method:'POST',body:JSON.stringify(next)});if(demo)demoWorkspace=structuredClone(data);changed();};
   return {
     get data(){return data;},
     async load(){if(!demo)data=await api('workspace');},

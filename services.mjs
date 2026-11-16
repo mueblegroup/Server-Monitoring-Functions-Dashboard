@@ -64,7 +64,16 @@ export async function integration(service,b,method){
   if(service==='proxmox') {
     const call=(path,m='GET',data)=>request(env('PROXMOX_URL'),'/api2/json'+path,{Authorization:`PVEAPIToken=${env('PROXMOX_TOKEN_ID')}=${env('PROXMOX_TOKEN_SECRET')}`},m,data,true,true).then(x=>x.data);
     if(method==='GET'){
+      if(b.view==='backups'){
+        const results=await Promise.allSettled([call('/cluster/backup'),call('/nodes')]);
+        const jobs=results[0].status==='fulfilled'&&Array.isArray(results[0].value)?results[0].value:[];
+        const nodes=results[1].status==='fulfilled'&&Array.isArray(results[1].value)?results[1].value:[];
+        const taskResults=await Promise.allSettled(nodes.filter(n=>n.status==='online').slice(0,30).map(n=>call('/nodes/'+name(n.node)+'/tasks?typefilter=vzdump&limit=50')));
+        const tasks=taskResults.filter(r=>r.status==='fulfilled'&&Array.isArray(r.value)).flatMap(r=>r.value).filter(t=>t.type==='vzdump');
+        return {jobs:jobs.map(j=>({id:j.id,node:j.node,schedule:j.schedule,enabled:j.enabled,nextRun:j['next-run'],storage:j.storage})),tasks:tasks.map(t=>({node:t.node,id:t.id,starttime:t.starttime,endtime:t.endtime,status:t.status,upid:t.upid})),errors:[...results,...taskResults].filter(r=>r.status==='rejected').map(r=>r.reason.message),updatedAt:new Date().toISOString()};
+      }
       if(b.view==='stats'){
+
         const [nodes,resources]=await Promise.all([call('/nodes'),call('/cluster/resources?type=vm')]);
         if(!Array.isArray(nodes)||!Array.isArray(resources))throw Object.assign(new Error('Proxmox returned an invalid node inventory.'),{status:424});
         const selected=b.node?name(b.node):(nodes.find(n=>n.status==='online')?.node||nodes[0]?.node);
@@ -73,11 +82,7 @@ export async function integration(service,b,method){
         if(!nodes.some(n=>n.node===selected))throw Object.assign(new Error('Unknown Proxmox node'),{status:400});
         const online=nodes.find(n=>n.node===selected).status==='online';
         const results=online?await Promise.allSettled([call(`/nodes/${selected}/status`),call(`/nodes/${selected}/storage`),
-          env('PROXMOX_SENSORS_URL')&&env('PROXMOX_SENSORS_TOKEN')?request(env('PROXMOX_SENSORS_URL'),'/metrics',{Authorization:'Bearer '+env('PROXMOX_SENSORS_TOKEN')},'GET',undefined,false,true).then(value=>{
-            if(value?.node!==selected)throw Object.assign(new Error('Sensor collector node does not match the selected Proxmox node.'),{status:424});
-            const clean=(rows,key,min,max)=>(Array.isArray(rows)?rows:[]).filter(r=>r&&Number.isFinite(r[key])&&r[key]>=min&&r[key]<=max).slice(0,100).map(r=>({label:String(r.label||'Sensor').slice(0,100),[key]:r[key]}));
-            return {temperatures:clean(value.temperatures,'celsius',-50,200),fans:[...clean(value.fans,'rpm',0,100000),...clean(value.fans,'percent',0,100)]};
-          }):Promise.resolve(null),b.history==='1'?call(`/nodes/${selected}/rrddata?timeframe=hour&cf=AVERAGE`):Promise.resolve([])]):[];
+          env('PROXMOX_SENSORS_URL')&&env('PROXMOX_SENSORS_TOKEN')?collectHostSensors(selected):Promise.resolve(null),b.history==='1'?call(`/nodes/${selected}/rrddata?timeframe=hour&cf=AVERAGE`):Promise.resolve([])]):[];
         return {nodes:nodes.map(({node,status,cpu,maxcpu,mem,maxmem,uptime})=>({node,status,cpu,maxcpu,mem,maxmem,uptime})),node:selected,
           stats:results[0]?.status==='fulfilled'?results[0].value:null,
           storage:results[1]?.status==='fulfilled'?results[1].value:[],
@@ -165,4 +170,13 @@ export async function jellyfinImage(item,kind='Backdrop'){
   if(!response.ok)throw Object.assign(Error('Movie artwork unavailable'),{status:404});
   const type=response.headers.get('content-type')?.split(';')[0];if(!['image/jpeg','image/png','image/webp'].includes(type))throw Error('Invalid artwork response');
   const bytes=Buffer.from(await response.arrayBuffer());if(bytes.length>4194304)throw Error('Artwork too large');return {type,bytes};
+}
+
+export async function collectHostSensors(node){
+ const value=await request(env('PROXMOX_SENSORS_URL'),'/metrics',{Authorization:'Bearer '+env('PROXMOX_SENSORS_TOKEN')},'GET',undefined,false,true);
+ if(node&&value?.node!==node)throw Object.assign(Error('Sensor collector node does not match the selected Proxmox node.'),{status:424});
+ if(typeof value?.node!=='string'||!/^[-\w.]{1,100}$/.test(value.node))throw Error('Invalid sensor host');
+ const clean=(rows,key,min,max)=>(Array.isArray(rows)?rows:[]).filter(r=>r&&Number.isFinite(r[key])&&r[key]>=min&&r[key]<=max).slice(0,100).map(r=>({label:String(r.label||'Sensor').slice(0,100),[key]:r[key],...(key==='celsius'&&Number.isFinite(r.warningCelsius)&&r.warningCelsius>0&&r.warningCelsius<=200?{warningCelsius:r.warningCelsius}:{})}));
+ const power=clean(value.power,'watts',0,100000);const meter=power.find(r=>/^IPMI: Power Meter$/i.test(r.label))||power.find(r=>!/supply|psu/i.test(r.label));
+ return {node:value.node,temperatures:clean(value.temperatures,'celsius',-50,200),fans:[...clean(value.fans,'rpm',0,100000),...clean(value.fans,'percent',0,100)],power,watts:meter?.watts??null,powerSource:meter?.label??null};
 }

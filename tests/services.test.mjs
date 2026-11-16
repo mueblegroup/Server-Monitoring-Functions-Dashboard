@@ -1,6 +1,6 @@
 import {test,after} from 'node:test';
 import assert from 'node:assert/strict';
-import {integration,jellyfinImage} from '../services.mjs';
+import {integration,jellyfinImage,collectHostSensors} from '../services.mjs';
 import https from 'node:https';
 import {EventEmitter} from 'node:events';
 import {Readable} from 'node:stream';
@@ -128,4 +128,13 @@ test('Jellyfin artwork uses the configured server and keeps credentials in reque
  const result=await jellyfinImage('abc123','Backdrop');assert.equal(result.type,'image/jpeg');assert.equal(result.bytes.length,3);
  await assert.rejects(jellyfinImage('../escape','Backdrop'),/Invalid/);
  globalThis.fetch=async()=>new Response('<script>',{headers:{'content-type':'text/html'}});await assert.rejects(jellyfinImage('abc123','Backdrop'),/Invalid artwork/);
+});
+
+test('Power readings select the total meter instead of summing duplicate PSU and ACPI readings',async()=>{
+ Object.assign(process.env,{PROXMOX_SENSORS_URL:'http://sensors.example',PROXMOX_SENSORS_TOKEN:'sensor-secret'});
+ try{mock([{node:'pve',power:[{label:'IPMI: Power Supply 1',watts:140},{label:'acpi: power1',watts:140},{label:'IPMI: Power Meter',watts:138}],temperatures:[{label:'Temp 30',celsius:78,warningCelsius:110}],fans:[{label:'Fan 1',percent:13.72}]}]);const result=await collectHostSensors('pve');assert.equal(result.watts,138);assert.equal(result.temperatures[0].warningCelsius,110);assert.equal(result.fans[0].percent,13.72);}finally{delete process.env.PROXMOX_SENSORS_URL;delete process.env.PROXMOX_SENSORS_TOKEN;}
+});
+test('Backup tiles read node task history and retain schedules when one node fails',async()=>{
+ mock([{data:[{id:'daily',enabled:1,schedule:'02:00','next-run':1900000000}]},{data:[{node:'pve',status:'online'}]},{data:[{node:'pve',type:'vzdump',endtime:1800000000,status:'OK'}]}]);const result=await integration('proxmox',{view:'backups'},'GET');assert.equal(result.jobs[0].nextRun,1900000000);assert.equal(result.tasks[0].status,'OK');assert.match(calls[2].url,/nodes\/pve\/tasks\?typefilter=vzdump&limit=50/);assert.equal(calls.every(c=>c.method==='GET'),true);
+ let call=0;globalThis.fetch=async()=>{call++;if(call===1)return Response.json({data:[{id:'daily'}]});if(call===2)return Response.json({data:[{node:'pve',status:'online'}]});return new Response('Forbidden',{status:403});};const partial=await integration('proxmox',{view:'backups'},'GET');assert.equal(partial.jobs.length,1);assert.equal(partial.errors.length,1);
 });
