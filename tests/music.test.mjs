@@ -6,5 +6,5 @@ test('Music accepts playlist shares and rejects arbitrary origins and injected U
  assert.equal(playlistId('https://www.youtube.com/watch?v=video&list=PL123456789'),'PL123456789');
  assert.equal(playlistId('PL123456789'),'PL123456789');assert.equal(playlistId(''),'');
  for(const input of ['javascript:alert(1)','https://attacker.example/?list=PL123456789','https://youtube.com.attacker.example/?list=PL123456789','https://music.youtube.com/playlist?list=%22%3E'])assert.throws(()=>playlistId(input),/playlist/);
- assert.deepEqual(defaultLayout().widgets.slice(0,6).map(w=>w.id),['clock','music','cpu','memory','health','network']);
+ assert.deepEqual(defaultLayout().widgets.slice(0,7).map(w=>w.id),['clock','music','movies','cpu','memory','health','network']);
 });
