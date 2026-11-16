@@ -116,11 +116,25 @@ If the executable is outside the service PATH, use its absolute path in CODEX_BI
 
 The first landscape screen uses a cockpit arrangement: large clock/local weather on the left, music on the right, and four small CPU, RAM, host/root-disk, and WAN tiles beneath. Hardware sensor badges remain in the host tile. Other widgets continue on subsequent screens. On smaller portrait displays, normal card packing preserves readability. Use Expand view to see all detail fields and the custom widget widths.
 
-CPU, memory, and root-disk sparklines use the last hour of Proxmox RRD data when available. The optional RRD request can fail without losing current host metrics. WAN download history builds from real SNMP samples while the dashboard is open (up to 30 minutes); it has no backfilled history. Until enough samples exist, the tile says Collecting history. Curves have no synthetic live data. Music continues to use YouTube's supported embedded playlist player rather than custom Spotify-style account controls.
+CPU, memory, and root-disk sparklines use the last hour of Proxmox RRD data when available. The optional RRD request can fail without losing current host metrics. WAN download history builds from real SNMP samples while the dashboard is open (up to 30 minutes); it has no backfilled history. Until enough samples exist, the tile says Collecting history. Curves have no synthetic live data. Music defaults to the custom Spotify player; the visible YouTube playlist embed remains available as a fallback.
 
 ### Music and fullscreen
 
-The music card is first on new layouts. Older layouts are promoted once when adding playlist support; afterward the normal Customize controls can move it. Choose **Connect playlist**, paste a YouTube Music/YouTube playlist Share link, and save. The playlist must be public or unlisted and allow embedding. Playback uses the YouTube privacy-enhanced embedded player with no autoplay; click Play. This connects a playlist, not the full YouTube Music account/library. No API key, password, cookies, or OAuth token is needed. Private playlists and restricted tracks may require opening the official YouTube Music app instead.
+#### Spotify custom player (default)
+
+Spotify now uses a custom card with real album artwork, track/artist/album metadata, playback position, previous/play/pause/next, seeking, volume/mute and device transfer. Spotify Premium is required. The SDK connects only for a linked account and never starts playback automatically. Browsers must support encrypted media; autoplay restrictions can require pressing **Use this device** or Play. Leaving Overview disconnects this browser playback device; other Spotify clients remain available.
+
+1. Create an app in [Spotify Developer Dashboard](https://developer.spotify.com/dashboard). Register **exactly** `https://orbit.mueble-playground.cc/api/spotify/callback` as its redirect URI (or your actual PUBLIC_ORIGIN followed by `/api/spotify/callback`). Enable Web API / Web Playback SDK where the app settings offer these choices.
+2. For Development Mode, ensure the account is permitted under the app's Users Management settings. The app owner and playback account must meet Spotify's Premium/access requirements.
+3. Put the app's **Client ID** in Orbit `.env`: `SPOTIFY_CLIENT_ID=YOUR_CLIENT_ID`. No client secret is needed; authorization uses PKCE. Restart Orbit.
+4. Choose **Connect Spotify** on the music card, authorize your account on Spotify, and return to Orbit.
+5. Choose **Use this device**, then **Choose music** and paste a Spotify album/playlist Share link. Alternatively select **Orbit Dashboard** in Spotify Connect and start music in the official client.
+
+OAuth state is single-use, expires after ten minutes and is bound to the initiating Orbit account/session. Refresh tokens are stored per Orbit user in SQLite, encrypted with AES-256-GCM. Keep `data/spotify-token.key` with the database in backups; losing the key requires reconnecting Spotify. Only the short-lived access token required by the official browser SDK reaches that user's browser memory. Refresh tokens and client configuration secrets are never returned. Disconnect removes the local authorization; Spotify's account Apps page can revoke app access as well.
+
+Use the **YouTube** button to switch back to the existing visible playlist embed. **Use Spotify** returns to the custom player. Playback permission errors are shown directly; unavailable tracks, Premium/account limitations and browser DRM restrictions are not silently bypassed.
+
+For the YouTube fallback, choose **Connect playlist**, paste a YouTube Music/YouTube playlist Share link, and save. The playlist must be public or unlisted and allow embedding. Playback uses the YouTube privacy-enhanced embedded player with no autoplay; click Play. This connects a playlist, not the full YouTube Music account/library. No API key, password, cookies, or OAuth token is needed. Private playlists and restricted tracks may require opening the official YouTube Music app instead.
 
 Use **Full screen** in the header for the browser Fullscreen API and screen-fit layout. Exit with the same button or Escape. Landscape orientation uses the extra width automatically; orientation is not forcibly locked. Browsers without Fullscreen API support can use their own fullscreen command or Add to Home Screen.
 
