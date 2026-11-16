@@ -72,10 +72,16 @@ export async function integration(service,b,method){
         name(selected);
         if(!nodes.some(n=>n.node===selected))throw Object.assign(new Error('Unknown Proxmox node'),{status:400});
         const online=nodes.find(n=>n.node===selected).status==='online';
-        const results=online?await Promise.allSettled([call(`/nodes/${selected}/status`),call(`/nodes/${selected}/storage`)]):[];
+        const results=online?await Promise.allSettled([call(`/nodes/${selected}/status`),call(`/nodes/${selected}/storage`),
+          env('PROXMOX_SENSORS_URL')&&env('PROXMOX_SENSORS_TOKEN')?request(env('PROXMOX_SENSORS_URL'),'/metrics',{Authorization:'Bearer '+env('PROXMOX_SENSORS_TOKEN')},'GET',undefined,false,true).then(value=>{
+            if(value?.node!==selected)throw Object.assign(new Error('Sensor collector node does not match the selected Proxmox node.'),{status:424});
+            const clean=(rows,key,min,max)=>(Array.isArray(rows)?rows:[]).filter(r=>r&&Number.isFinite(r[key])&&r[key]>=min&&r[key]<=max).slice(0,100).map(r=>({label:String(r.label||'Sensor').slice(0,100),[key]:r[key]}));
+            return {temperatures:clean(value.temperatures,'celsius',-50,200),fans:clean(value.fans,'rpm',0,100000)};
+          }):Promise.resolve(null)]):[];
         return {nodes:nodes.map(({node,status,cpu,maxcpu,mem,maxmem,uptime})=>({node,status,cpu,maxcpu,mem,maxmem,uptime})),node:selected,
           stats:results[0]?.status==='fulfilled'?results[0].value:null,
           storage:results[1]?.status==='fulfilled'?results[1].value:[],
+          sensors:results[2]?.status==='fulfilled'?results[2].value:null,
           guests:resources.filter(r=>r.node===selected).map(({vmid,name,type,status,cpu,mem,maxmem})=>({vmid,name,type,status,cpu,mem,maxmem})),
           errors:results.filter(r=>r.status==='rejected').map(r=>r.reason?.message||'Metrics unavailable'),updatedAt:new Date().toISOString()};
       }
