@@ -18,7 +18,7 @@ function serverRequest(url,options){
         const text=Buffer.concat(chunks).toString('utf8');
         resolve({status:res.statusCode,ok:res.statusCode>=200&&res.statusCode<300,
           headers:{get:key=>res.headers[key.toLowerCase()]||null},
-          text:async()=>text,json:async()=>JSON.parse(text)});
+          arrayBuffer:async()=>Buffer.concat(chunks),text:async()=>text,json:async()=>JSON.parse(text)});
       });
     });
     req.on('error',reject);
@@ -76,7 +76,7 @@ export async function integration(service,b,method){
           env('PROXMOX_SENSORS_URL')&&env('PROXMOX_SENSORS_TOKEN')?request(env('PROXMOX_SENSORS_URL'),'/metrics',{Authorization:'Bearer '+env('PROXMOX_SENSORS_TOKEN')},'GET',undefined,false,true).then(value=>{
             if(value?.node!==selected)throw Object.assign(new Error('Sensor collector node does not match the selected Proxmox node.'),{status:424});
             const clean=(rows,key,min,max)=>(Array.isArray(rows)?rows:[]).filter(r=>r&&Number.isFinite(r[key])&&r[key]>=min&&r[key]<=max).slice(0,100).map(r=>({label:String(r.label||'Sensor').slice(0,100),[key]:r[key]}));
-            return {temperatures:clean(value.temperatures,'celsius',-50,200),fans:clean(value.fans,'rpm',0,100000)};
+            return {temperatures:clean(value.temperatures,'celsius',-50,200),fans:[...clean(value.fans,'rpm',0,100000),...clean(value.fans,'percent',0,100)]};
           }):Promise.resolve(null),b.history==='1'?call(`/nodes/${selected}/rrddata?timeframe=hour&cf=AVERAGE`):Promise.resolve([])]):[];
         return {nodes:nodes.map(({node,status,cpu,maxcpu,mem,maxmem,uptime})=>({node,status,cpu,maxcpu,mem,maxmem,uptime})),node:selected,
           stats:results[0]?.status==='fulfilled'?results[0].value:null,
@@ -141,10 +141,28 @@ export async function integration(service,b,method){
   }
   if(service==='hostinger'){
     const base='/api/vps/v1/virtual-machines',headers={Authorization:'Bearer '+env('HOSTINGER_TOKEN')};
-    if(method==='GET')return request('https://developers.hostinger.com',base+(b.vmid?'/'+id(b.vmid):''),headers);
+    if(method==='GET'){
+      const servers=await request('https://developers.hostinger.com',base+(b.vmid?'/'+id(b.vmid):''),headers);
+      if(b.view!=='billing')return servers;
+      try{const subscriptions=await request('https://developers.hostinger.com','/api/billing/v1/subscriptions',headers);
+      return {servers:(Array.isArray(servers)?servers:servers.data||[]).map(vm=>{const sub=(Array.isArray(subscriptions)?subscriptions:subscriptions.data||[]).find(x=>String(x.id)===String(vm.subscription_id));return {...vm,billing:sub?{name:sub.name,currency:sub.currency_code,amount:Number.isFinite(sub.renewal_price)?sub.renewal_price/100:null,due:sub.is_auto_renewed?sub.next_billing_at:sub.expires_at,autoRenew:sub.is_auto_renewed,period:sub.billing_period,unit:sub.billing_period_unit}:null};})};
+      }catch(error){return {servers:Array.isArray(servers)?servers:servers.data||[],billingError:error.message};}
+    }
     allowed(b.action,['start','stop','restart']);return request('https://developers.hostinger.com',base+'/'+id(b.vmid)+'/'+b.action,headers,'POST');
   }
   if(method!=='GET')throw Object.assign(new Error('Read-only integration'),{status:405});
   if(service==='jellyfin')return request(env('JELLYFIN_URL'),'/Items?IncludeItemTypes=Movie&Recursive=true&SortBy=Random&Limit=8&Fields=Overview',{Authorization:`MediaBrowser Token="${env('JELLYFIN_TOKEN')}"`},'GET',undefined,false,true);
   if(service==='pfsense')return env('PFSENSE_SNMP_HOST')&&env('PFSENSE_SNMP_COMMUNITY')?collectPfSense():request(env('PFSENSE_METRICS_URL'),'',{Authorization:'Bearer '+env('PFSENSE_METRICS_TOKEN')},'GET',undefined,false,true);
+}
+
+export async function jellyfinImage(item,kind='Backdrop'){
+  requireValue(item,/^[a-fA-F0-9-]{1,64}$/,'movie ID');
+  if(!['Backdrop','Primary'].includes(kind))throw Object.assign(Error('Invalid image kind'),{status:400});
+  if(!configured().jellyfin)throw Object.assign(Error('Connect Jellyfin first'),{status:400});
+  const base=new URL(env('JELLYFIN_URL'));if(!['http:','https:'].includes(base.protocol)||base.username||base.password||base.search||base.hash)throw Error('Invalid Jellyfin URL');
+  const transport=base.protocol==='https:'&&env('SERVER_TLS_VERIFY')==='false'?serverRequest:fetch;
+  const response=await transport(env('JELLYFIN_URL').replace(/\/$/,'')+'/Items/'+item+'/Images/'+kind+'?maxWidth=1000&quality=85',{method:'GET',headers:{'X-Emby-Token':env('JELLYFIN_TOKEN')},redirect:'manual',signal:AbortSignal.timeout(15000)});
+  if(!response.ok)throw Object.assign(Error('Movie artwork unavailable'),{status:404});
+  const type=response.headers.get('content-type')?.split(';')[0];if(!['image/jpeg','image/png','image/webp'].includes(type))throw Error('Invalid artwork response');
+  const bytes=Buffer.from(await response.arrayBuffer());if(bytes.length>4194304)throw Error('Artwork too large');return {type,bytes};
 }
