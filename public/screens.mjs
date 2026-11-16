@@ -81,7 +81,7 @@ export function mountScreenFit(){
     if(!mode){document.body.classList.remove('cockpit-layout','cockpit-front');for(const card of grid.children)card.classList.remove('screen-card-hidden','fit-summary','fit-tight','fit-micro');for(const el of grid.querySelectorAll('.screen-item-hidden'))el.classList.remove('screen-item-hidden');pager.hidden=true;for(const controls of listPagers.values())if(!controls.hidden)controls.hidden=true;grid.style.removeProperty('--screen-columns');grid.style.removeProperty('--screen-rows');return;}
     const width=grid.getBoundingClientRect().width,viewport=window.visualViewport?.height||window.innerHeight;
     document.documentElement.style.setProperty('--viewport-height',`${viewport}px`);
-    const overview=Boolean(grid.querySelector('[data-widget="clock"]'));
+    const overview=!grid.dataset.customPage&&Boolean(grid.querySelector('[data-widget="clock"]'));
     const cockpit=overview&&window.innerWidth>viewport;
     document.body.classList.toggle('cockpit-layout',cockpit);
     const bottom=document.querySelector('#nav').getBoundingClientRect().top;
@@ -93,15 +93,15 @@ export function mountScreenFit(){
     const {columns,rows}=geometry;
     grid.style.setProperty('--screen-columns',String(columns));grid.style.setProperty('--screen-rows',String(rows));grid.style.setProperty('--screen-height',`${available}px`);
     const cards=[...grid.children].filter(el=>!el.hidden);
-    const frontIds=['clock','music','cpu','memory','health','network'];
+    const frontIds=['clock','music','movies','cpu','memory','health','network'];
     const frontCards=geometry.cockpit?cards.map((el,id)=>({el,id})).filter(({el})=>frontIds.includes(el.dataset.widget)):[];
     const frontIndexes=new Set(frontCards.map(c=>c.id));
     const rest=cards.map((el,id)=>({id,width:Number([...el.classList].find(c=>/^span\d+$/.test(c))?.slice(4))||4})).filter(c=>!frontIndexes.has(c.id));
-    pages=[...(frontCards.length?[frontCards.map(({el,id})=>({id,span:['clock','music'].includes(el.dataset.widget)?2:1}))]:[]),...packScreens(rest,columns,rows)];
+    pages=[...(frontCards.length?[frontCards.map(({el,id})=>({id,span:el.dataset.widget==='clock'?4:2}))]:[]),...packScreens(rest,columns,rows)];
     index=Math.max(0,Math.min(index,pages.length-1));
     const cockpitFront=Boolean(frontCards.length)&&index===0;
     document.body.classList.toggle('cockpit-front',cockpitFront);
-    if(cockpitFront){grid.style.setProperty('--screen-columns','4');grid.style.setProperty('--screen-rows','2');}
+    if(cockpitFront){grid.style.setProperty('--screen-columns','8');grid.style.setProperty('--screen-rows','2');}
     const visible=new Set((pages[index]||[]).map(item=>item.id));
     cards.forEach((el,id)=>el.classList.toggle('screen-card-hidden',!visible.has(id)));
     for(const item of pages[index]||[])cards[item.id].style.setProperty('--screen-span',String(item.span));
