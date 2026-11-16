@@ -1,0 +1,17 @@
+services:
+  orbit:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3000:3000"
+    env_file: .env
+    environment:
+      HOST: 0.0.0.0
+    volumes:
+      - orbit-data:/app/data
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+volumes:
+  orbit-data:
