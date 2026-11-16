@@ -229,3 +229,69 @@ The systemd collector runs as nobody, so IPMI will only work if that service acc
 ### YouTube Music account playback
 
 Gmail sign-in and YouTube Premium work in the official YouTube Music app/site. The official YouTube APIs do not offer a full YouTube Music account playback SDK comparable to Spotify. Orbit can embed supported public/unlisted playlists with the visible YouTube player; Google OAuth alone does not turn that into your Premium Music library or guarantee ad-free/background playback. Use **Open YouTube Music** for the signed-in experience, or Spotify Premium for the integrated custom player. Orbit does not collect Google passwords or browser cookies.
+
+## Smart stacks, visual layouts and operations
+
+The toolbar now includes **Edit layout** and **Display**. All six new tiles can be selected through **Customize**, **Pages**, or the visual editor: Smart stack, Power & electricity, Service uptime, Backup status, Automation, and Billing overview. A compact health strip adds host/service warnings and upcoming fixed-bill/Hostinger reminders. Reminders appear inside Orbit; this release does not send email, SMS or push notifications.
+
+### Visual layouts and appearance
+
+**Edit layout** uses a 12-column by 6-row grid. Drag a tile to move it; drag its bottom-right corner to resize, or use the numeric controls/arrow keys. Add/remove any supported tile. Overlaps and out-of-bounds rectangles are rejected. The preview uses current tile readings without starting duplicate players or controls. Initial seeding includes only tiles that fit, so add the others deliberately. Save a portrait and landscape arrangement independently for each dashboard page. When a visual arrangement exists, **Customize** opens the visual editor. **Use automatic layout** removes both orientation overrides for that page and returns to responsive pagination. Very small tiles still use compact summaries and Details; adding more content than a physical screen can display does not make it readable.
+
+**Display** configures appearance globally or for the current page: original/rounded/flat/glass preset, accent, font, spacing, card corners and opacity. Controls preview appearance before saving; dismissing the dialog restores saved appearance. A page override takes precedence over global appearance; **Use global appearance for this page** removes that override. Settings/layouts persist per account in SQLite. Demo edits are temporary and remain within that browser visit.
+
+Smart stack supports CPU, memory, hottest temperature, fan speed, power and WAN download. Select the contents and interval in Display. Use previous/next, swipe horizontally, or pause/resume on the tile. Auto-rotation stops while the tile is offscreen, the tab is hidden, or a dialog is open.
+
+### Power and energy
+
+Update deploy/host-sensors.py on the physical host and restart orbit-sensors. The collector now includes hwmon power input/average values (microwatts converted to watts), IPMI Watts readings, and temperature warning thresholds when supplied. Orbit prefers the IPMI **Power Meter** total over other non-PSU meter readings. It never adds ACPI, PSU and IPMI copies together. A PSU-only reading is not assumed to be whole-server power. Percentage fan readings remain percentages.
+
+The Orbit server samples the configured collector every approximately 30 seconds and retains readings for 30 days, even when no dashboard is open. The tile shows fresh power, the last 24 hours of history, observed kWh, and covered sample hours. Energy is trapezoidally integrated between valid samples; gaps over three minutes are excluded. No history is fabricated/backfilled. Set currency and your per-kWh rate in Display. Observed energy cost uses the current flat rate; at-this-load daily/30-day costs are projections, not a utility bill. Taxes, tiers, standing charges and previous tariff changes are not modeled. Updating the collector remains a host installation step; pulling the Orbit repository does not update the file already installed under /opt/orbit-sensors.
+
+### Service monitoring
+
+Orbit monitors itself on loopback by default. To replace that list, put JSON in the server's .env, with single quotes around it:
+
+```dotenv
+ORBIT_MONITORS='[{"id":"orbit","name":"Orbit","url":"http://127.0.0.1:3000/","intervalSeconds":60,"expectedStatus":200},{"id":"n8n","name":"n8n","url":"https://n8n.mueble-playground.cc/","intervalSeconds":60,"expectedStatus":200}]'
+```
+
+Add Jellyfin, Postiz and websites using their real reachable URLs. Optional `token` sends a Bearer header. URLs/credentials stay server-side and are never accepted from browser requests. HTTP/HTTPS only; redirects are not followed. HTTPS certificate verification remains enabled for uptime checks. The scheduler wakes every 30 seconds, checks due services in batches of five, and uses an eight-second timeout. Checks and power sampling stop when Orbit is stopped. Restart after changing environment configuration. Use ORBIT_MONITORS=[] to disable service checks.
+
+Uptime shows current check status and response time. **History** shows response graphs, passing-check percentage and observed outage/recovery timestamps. It is sampled availability, not proof of uninterrupted uptime or a service's internal functionality. Missing/stale checks are marked unknown/stale. Data is retained for 30 days; the UI returns up to 1,440 recent checks per target. HTTP 200 on a login page only proves that URL responded; use a dedicated health endpoint where available.
+
+### Backups and alerts
+
+Backup status reads `/cluster/backup`, `/nodes`, and each online node's `/nodes/{node}/tasks?typefilter=vzdump&limit=50`. It displays the latest successful returned task, failed/warning tasks, configured jobs and the provider's next-run timestamp. Partial failures preserve available schedules/history. `Sys.Audit` is needed for cluster backup configuration and other users' task history. No backup is started or modified. This is task history, not verification of backup contents or complete guest coverage; older tasks outside the returned history are unavailable.
+
+Display lets you set fallback temperature, storage usage and bill reminder thresholds. Hardware-provided temperature warnings take precedence, so a zone with a 110°C warning threshold is not judged by the generic CPU threshold. The strip also reports offline nodes, missing metrics and stale/offline service checks. Select the alert count to read all current alerts.
+
+### Kiosk
+
+Enable kiosk in Display, select pages and interval, configure night hours/brightness, and optionally keep the screen awake. Rotation advances internal widget screens before moving to the next selected page. Interaction pauses rotation for 60 seconds; the header offers manual Pause/Resume. Open dialogs, hidden tabs and foreground loading pause rotation. Portrait/landscape layouts follow device orientation. Night hours use the viewing device's local clock; equal start/end disables dimming. Wake lock is best-effort and depends on browser support/power settings. Enter fullscreen using the existing header button; browsers require a user gesture. The dim overlay does not alter the device's physical brightness setting.
+
+### n8n / webhook actions and results
+
+Configure only named actions you want available in Orbit. Each trigger requires an Orbit session, CSRF, exact-origin validation and explicit confirmation. In-flight duplicate requests are rejected; HTTP failures/timeouts are never retried automatically. Request URLs and credentials cannot be supplied by the browser.
+
+```dotenv
+ORBIT_AUTOMATIONS='[{"id":"daily-report","name":"Generate daily report","url":"https://YOUR_N8N_HOST/webhook/orbit-daily-report","token":"OUTBOUND_WEBHOOK_BEARER_SECRET","callbackToken":"SEPARATE_LONG_RANDOM_RESULT_SECRET"}]'
+```
+
+Restart Orbit. Configure the n8n Webhook node to accept POST and require the outbound Bearer secret. Orbit sends `{source:"orbit",action:"daily-report",requestedAt:"..."}`. HTTP acceptance leaves the tile waiting for workflow completion; a successful request is not treated as a completed workflow.
+
+At the end of the workflow, use an HTTP Request node to POST to:
+
+```
+https://YOUR_ORBIT_HOST/api/automation-events/daily-report
+```
+
+Headers: `Authorization: Bearer SEPARATE_LONG_RANDOM_RESULT_SECRET`, `Content-Type: application/json`. Body:
+
+```json
+{"status":"success","summary":"Daily report generated"}
+```
+
+Supported statuses are running/success/failed; summary is plain text up to 500 characters. Callbacks authenticate with the separate callback token and do not require browser cookies, Origin or CSRF. Use HTTPS and unique random secrets; keep the .env outside git. Automation actions are audited. History/result data persists in SQLite; a timed-out trigger may already have executed, so check n8n before sending another request.
+
+Billing overview combines fixed bills and available Hostinger renewal prices into monthly/yearly equivalents **per currency**, with upcoming due dates. Do not add the same Hostinger cost manually unless you intend it to be counted twice. There is no currency conversion or payment verification.
