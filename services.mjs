@@ -7,11 +7,21 @@ const name=v=>requireValue(v,/^[a-zA-Z0-9_.-]{1,100}$/,'name');
 const domain=v=>requireValue(v,/^(?=.{1,253}$)(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,63}$/,'domain');
 function allowed(action,actions){if(!actions.includes(action))throw Object.assign(new Error('Unsupported action'),{status:400});}
 async function request(base,path,headers={},method='GET',data,form=false){
-  const u=new URL(base); if(!['http:','https:'].includes(u.protocol)||u.username||u.password)throw new Error('Invalid service URL');
-  const r=await fetch(base.replace(/\/$/,'')+path,{method,redirect:'error',signal:AbortSignal.timeout(20000),headers:{...headers,...(data?{'Content-Type':form?'application/x-www-form-urlencoded':'application/json'}:{})},body:data?(form?new URLSearchParams(data).toString():JSON.stringify(data)):undefined});
-  if(!r.ok)throw new Error('Upstream rejected request');
-  const text=await r.text(); const value=text?JSON.parse(text):null;
-  if(value?.success===false||value?.error)throw new Error('Upstream reported error');return value;
+  const error=message=>Object.assign(new Error(message),{status:502});
+  let u;try{u=new URL(base);}catch{throw error('Invalid service base URL. Include http:// or https:// and the panel port.');}
+  if(!['http:','https:'].includes(u.protocol)||u.username||u.password||u.search||u.hash)throw error('Invalid service URL. Use a base URL without credentials, query parameters or fragments.');
+  let r;
+  try {r=await fetch(base.replace(/\/$/,'')+path,{method,redirect:'manual',signal:AbortSignal.timeout(20000),headers:{...headers,...(data?{'Content-Type':form?'application/x-www-form-urlencoded':'application/json'}:{})},body:data?(form?new URLSearchParams(data).toString():JSON.stringify(data)):undefined});}
+  catch(e){
+    const code=e.cause?.code;
+    const hint=['ENOTFOUND','EAI_AGAIN'].includes(code)?'DNS lookup failed. Check that the container can resolve the panel hostname.':['ECONNREFUSED','ETIMEDOUT','EHOSTUNREACH','ENETUNREACH'].includes(code)?'Cannot reach the panel. Check its port, firewall and container routing.':/CERT|TLS|SELF_SIGNED/.test(code||'')?'TLS certificate verification failed. Install the private CA using NODE_EXTRA_CA_CERTS.':e.name==='TimeoutError'?'The service timed out. Check container connectivity.':'Connection failed. Check the URL, TLS certificate and network access.';
+    throw error(`${u.host}: ${hint}`);
+  }
+  if(r.status>=300&&r.status<400)throw error(`${u.host} redirected the API request (HTTP ${r.status}). Use the panel API origin, not a login page or access-portal URL.`);
+  if(!r.ok)throw error(`${u.host} rejected the API request (HTTP ${r.status}). ${[401,403].includes(r.status)?'Check API credentials, permissions, IP allowlists and access policies.':r.status===404?'Check the base URL and panel port.':'Check the service or reverse proxy.'}`);
+  const text=await r.text();let value;
+  try{value=text?JSON.parse(text):null;}catch{throw error(`${u.host} returned ${/^\s*</.test(text)?'HTML':'non-JSON content'} instead of API JSON. Check the panel base URL/port and any proxy or Cloudflare Access policy. Proxmox uses /api2/json; Hestia uses /api/. Do not put those paths in the base URL.`);}
+  if(value?.success===false||value?.error)throw error(`${u.host} reported an API error. Check service permissions and configuration.`);return value;
 }
 export async function integration(service,b,method){
   if(!configured()[service])throw Object.assign(new Error('Not connected. Configure this service in the server environment.'),{status:503});
