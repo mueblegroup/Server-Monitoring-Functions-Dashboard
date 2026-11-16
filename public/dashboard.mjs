@@ -1,7 +1,8 @@
+import {personalWorkspace,renderBills,renderHostinger,renderMovies} from './personal.mjs';
 import {mountSpotify} from './spotify-player.mjs';
 import {sampleTrend,sparkline} from './trends.mjs';
-const definitions=[['cpu','CPU usage',4],['memory','Memory & swap',4],['health','Server health',4],['storage','Storage pools',6],['guests','Containers & VMs',6],['clock','Clock',4],['weather','Weather',4],['infrastructure','Infrastructure',4],['network','Network',6],['music','Music',6],['codex','OpenAI Codex usage',6],['stripe','Stripe events',4],['movies','Movies',4],['launch','Quick launch',4]];
-const front=['clock','music','cpu','memory','health','network'];
+const definitions=[['cpu','CPU usage',4],['memory','Memory & swap',4],['health','Server health',4],['storage','Storage pools',6],['guests','Containers & VMs',6],['clock','Clock',4],['weather','Weather',4],['infrastructure','Infrastructure',4],['network','Network',6],['music','Music',6],['codex','OpenAI Codex usage',6],['stripe','Stripe events',4],['movies','Movies',4],['launch','Quick launch',4],['bills','Recurring bills',6],['hostinger','Hostinger billing',6]];
+const front=['clock','music','movies','cpu','memory','health','network'];
 const initialOrder=[...front,'codex'];
 export const defaultLayout=()=>({node:'',refresh:30,musicPlaylist:'',cockpitVersion:1,widgets:[...initialOrder.map(id=>definitions.find(d=>d[0]===id)),...definitions.filter(d=>!initialOrder.includes(d[0]))].map(([id,,width])=>({id,width,visible:true}))});
 export function playlistId(input){
@@ -14,11 +15,13 @@ const numeric=value=>value!==null&&value!==undefined&&value!==''&&Number.isFinit
 const bytes=value=>numeric(value)?`${(Number(value)/1073741824).toFixed(1)} GiB`:'Unavailable';
 const percent=(used,total)=>numeric(used)&&numeric(total)&&Number(total)>0?Math.min(100,Math.max(0,Number(used)/Number(total)*100)):null;
 const uptime=value=>{if(!numeric(value))return 'Unavailable';const h=Math.floor(Number(value)/3600);return `${Math.floor(h/24)}d ${h%24}h`;};
-export function mountDashboard({api,esc,connected,demo,openModal,toast}){
+export function mountDashboard({api,esc,connected,demo,openModal,toast,customPageId=null}){
   const grid=document.querySelector('#app > .grid');
   if(!grid)return ()=>{};
   let active=true,timer,networkTimer,quotaTimer,quotaBusy=false,networkBusy=false,busy=false,layout=defaultLayout(),latest=null,lastSuccess=null,saving=false;
   const cards=new Map();
+  grid.dataset.customPage=customPageId||'';
+  const personal=personalWorkspace({api,esc,openModal,toast,definitions,demo,changed:()=>{if(active){apply();renderBills(cards.get('bills'),personal.data.bills,esc,()=>personal.bills());}}});
   const existing=['clock','weather','infrastructure','network','music','stripe','movies','launch'];
   [...grid.children].forEach((el,index)=>{el.dataset.widget=existing[index];cards.set(existing[index],el);});
   const weather=cards.get('weather').querySelector('#weather');
@@ -30,6 +33,7 @@ export function mountDashboard({api,esc,connected,demo,openModal,toast}){
     cards.set(id,el);grid.append(el);
   }
   const quotaCard=document.createElement('section');quotaCard.className='card span6';quotaCard.dataset.widget='codex';quotaCard.innerHTML='<div class="card-head"><h2>OpenAI Codex</h2><span class="label">USAGE LIMITS</span></div><div class="quota-body">Connect the Codex CLI to see account usage.</div>';cards.set('codex',quotaCard);grid.append(quotaCard);
+  for(const id of ['bills','hostinger']){const card=document.createElement('section');card.className='card span6';card.dataset.widget=id;card.innerHTML='<h2>'+definitions.find(d=>d[0]===id)[1]+'</h2><p>Loading...</p>';cards.set(id,card);grid.append(card);}
   async function refreshQuota(){
     if(!active||demo||quotaBusy||document.hidden||quotaCard.hidden)return;quotaBusy=true;
     const body=quotaCard.querySelector('.quota-body');
@@ -46,11 +50,15 @@ export function mountDashboard({api,esc,connected,demo,openModal,toast}){
     }catch(error){if(active)body.textContent='Usage unavailable: '+error.message;}finally{quotaBusy=false;}
   }
   const toolbar=document.createElement('section');toolbar.className='dashboard-toolbar';
-  toolbar.innerHTML='<div><span class="eyebrow">YOUR DASHBOARD</span><p class="subtle" id="metrics-updated">Host metrics refresh automatically while this page is visible.</p></div><div class="dashboard-controls"><label>Server<select id="dashboard-node" aria-label="Proxmox server"><option value="">Auto select</option></select></label><button type="button" class="small-button" id="dashboard-refresh">Refresh stats</button><button type="button" class="primary" id="dashboard-customize">Customize</button></div>';
+  toolbar.innerHTML='<div><span class="eyebrow">YOUR DASHBOARD</span><p class="subtle" id="metrics-updated">Host metrics refresh automatically while this page is visible.</p></div><div class="dashboard-controls"><label>Server<select id="dashboard-node" aria-label="Proxmox server"><option value="">Auto select</option></select></label><button type="button" class="small-button" id="dashboard-refresh">Refresh stats</button><button type="button" class="primary" id="dashboard-customize">Customize</button><button type="button" class="small-button" id="dashboard-pages">Pages</button></div>';
   grid.before(toolbar);
   const nodeSelect=toolbar.querySelector('select'),updated=toolbar.querySelector('#metrics-updated');
   const apply=()=>{
-    for(const widget of layout.widgets){const el=cards.get(widget.id);if(!el)continue;el.hidden=!widget.visible;el.classList.remove('span3','span4','span5','span6','span7','span8','span12');el.classList.add(`span${widget.width}`);grid.append(el);}
+    toolbar.querySelector('.eyebrow').textContent=customPageId==='usage'?'OPENAI USAGE':customPageId==='billing'?'BILLING':customPageId?(personal.data.pages.find(p=>p.id===customPageId)?.title||'Page unavailable'):'YOUR DASHBOARD';
+    const selected=customPageId==='usage'?[{id:'codex',width:12,visible:true}]:customPageId==='billing'?[{id:'hostinger',width:6,visible:true},{id:'bills',width:6,visible:true}]:customPageId?personal.data.pages.find(p=>p.id===customPageId)?.widgets||[]:layout.widgets;
+    if(weather){const target=selected.some(w=>w.id==='weather'&&w.visible)&&!selected.some(w=>w.id==='clock'&&w.visible)?cards.get('weather'):cards.get('clock');if(weather.parentElement!==target)target.append(weather);}
+    for(const card of cards.values())card.hidden=true;
+    for(const widget of selected){const el=cards.get(widget.id);if(!el)continue;el.hidden=!widget.visible;el.classList.remove('span3','span4','span5','span6','span7','span8','span12');el.classList.add(`span${widget.width}`);grid.append(el);}
     if(!layout.widgets.some(w=>w.visible))updated.textContent='All widgets are hidden. Choose Customize to add them back.';
   };
   let disposeMusic=()=>{};
@@ -105,10 +113,10 @@ export function mountDashboard({api,esc,connected,demo,openModal,toast}){
     if(s){
       const temperatures=data.sensors?.temperatures||[],fans=data.sensors?.fans||[];
       const temp=temperatures.length?Math.max(...temperatures.map(r=>r.celsius)).toFixed(1)+' °C':'--';
-      const fan=fans.length?Math.max(...fans.map(r=>r.rpm)).toFixed(0)+' RPM':'--';
+      const fan=fans.length?(fans.some(r=>numeric(r.rpm))?Math.max(...fans.filter(r=>numeric(r.rpm)).map(r=>r.rpm)).toFixed(0)+' RPM':Math.max(...fans.map(r=>r.percent)).toFixed(0)+'%'):'--';
       const badges=document.createElement('div');badges.className='sensor-badges';
       badges.innerHTML=`<button type="button" class="sensor-badge" aria-label="Server temperatures" title="Highest reported temperature">&#127777; ${temp}</button><button type="button" class="sensor-badge" aria-label="Server fan speeds" title="Highest reported fan speed">&#10051; ${fan}</button>`;
-      badges.onclick=()=>openModal(`<h2>Hardware sensors</h2><p class="subtle">${esc(data.node)} &middot; Readings from the physical host</p>${temperatures.length||fans.length?`<dl class="data-list">${temperatures.map(r=>`<dt>${esc(r.label)}</dt><dd>${r.celsius.toFixed(1)} °C</dd>`).join('')}${fans.map(r=>`<dt>${esc(r.label)}</dt><dd>${r.rpm.toFixed(0)} RPM</dd>`).join('')}</dl>`:'<p>No sensor readings available. Configure the host sensor collector described in the README. Fan readings require hardware and drivers that expose RPM.</p>'}`);
+      badges.onclick=()=>openModal(`<h2>Hardware sensors</h2><p class="subtle">${esc(data.node)} &middot; Readings from the physical host</p>${temperatures.length||fans.length?`<dl class="data-list">${temperatures.map(r=>`<dt>${esc(r.label)}</dt><dd>${r.celsius.toFixed(1)} °C</dd>`).join('')}${fans.map(r=>`<dt>${esc(r.label)}</dt><dd>${numeric(r.rpm)?r.rpm.toFixed(0)+' RPM':r.percent.toFixed(0)+'%'}</dd>`).join('')}</dl>`:'<p>No sensor readings available. Configure the host sensor collector described in the README. Fan readings require hardware and drivers that expose RPM.</p>'}`);
       cards.get('health').querySelector('.host-metric').append(badges);
     }
     set('storage',Array.isArray(data.storage)&&data.storage.length?data.storage.map(pool=>{
@@ -137,6 +145,7 @@ export function mountDashboard({api,esc,connected,demo,openModal,toast}){
     if(demo){layout=next;apply();schedule();return;}
     layout=await api('dashboard',{method:'POST',body:JSON.stringify(next)});if(active){apply();schedule();}
   }
+  toolbar.querySelector('#dashboard-pages').onclick=()=>personal.pages();
   toolbar.querySelector('#dashboard-refresh').onclick=()=>{refresh();refreshNetwork();};
   nodeSelect.onchange=async()=>{
     const previous=layout.node;
@@ -145,15 +154,19 @@ export function mountDashboard({api,esc,connected,demo,openModal,toast}){
   };
   toolbar.querySelector('#dashboard-customize').onclick=()=>{
     let draft=structuredClone(layout);
+    if(customPageId){const selected=customPageId==='usage'?[{id:'codex',width:12,visible:true}]:customPageId==='billing'?[{id:'hostinger',width:6,visible:true},{id:'bills',width:6,visible:true}]:personal.data.pages.find(p=>p.id===customPageId)?.widgets||[];draft.widgets=[...selected,...layout.widgets.filter(w=>!selected.some(s=>s.id===w.id)).map(w=>({...w,visible:false}))];}
     openModal('<div class="eyebrow">MAKE IT YOURS</div><h1>Customize dashboard</h1><p>Show, resize, and reorder your widgets. Layout follows your account across devices.</p><form id="dashboard-layout-form"><div id="dashboard-layout-list"></div><label class="dashboard-refresh-label">Refresh host stats<select name="refresh"><option value="0">Manually</option><option value="15">Every 15 seconds</option><option value="30">Every 30 seconds</option><option value="60">Every 60 seconds</option></select></label><div class="actions"><button class="primary" type="submit">Save layout</button><button class="small-button" type="button" id="dashboard-reset">Reset layout</button></div><p class="error" role="alert"></p></form>');
     const form=document.querySelector('#dashboard-layout-form'),list=form.querySelector('#dashboard-layout-list');form.elements.refresh.value=String(draft.refresh);
     const paint=()=>{list.innerHTML=draft.widgets.map((w,i)=>`<div class="layout-widget"><label class="check"><input type="checkbox" data-id="${w.id}" ${w.visible?'checked':''}>${definitions.find(d=>d[0]===w.id)[1]}</label><div class="layout-widget-controls"><select aria-label="${definitions.find(d=>d[0]===w.id)[1]} width" data-width="${w.id}"><option value="4" ${w.width===4?'selected':''}>Compact</option><option value="6" ${w.width===6?'selected':''}>Half width</option><option value="12" ${w.width===12?'selected':''}>Full width</option></select><button type="button" class="small-button" data-move="${i}" data-direction="-1" aria-label="Move ${w.id} up" ${i===0?'disabled':''}>Up</button><button type="button" class="small-button" data-move="${i}" data-direction="1" aria-label="Move ${w.id} down" ${i===draft.widgets.length-1?'disabled':''}>Down</button></div></div>`).join('');};paint();
     list.onchange=e=>{const w=draft.widgets.find(w=>w.id===(e.target.dataset.id||e.target.dataset.width));if(w){if(e.target.dataset.id)w.visible=e.target.checked;else w.width=Number(e.target.value);}};
     list.onclick=e=>{const button=e.target.closest('button[data-move]');if(!button)return;const i=Number(button.dataset.move),j=i+Number(button.dataset.direction);[draft.widgets[i],draft.widgets[j]]=[draft.widgets[j],draft.widgets[i]];paint();list.querySelector(`[data-move="${j}"][data-direction="${button.dataset.direction}"]`)?.focus();};
     form.querySelector('#dashboard-reset').onclick=()=>{draft={...defaultLayout(),musicPlaylist:layout.musicPlaylist||''};form.elements.refresh.value='30';paint();};
-    form.onsubmit=async e=>{e.preventDefault();if(saving||!active)return;saving=true;const button=form.querySelector('[type=submit]');button.disabled=true;try{draft.refresh=Number(form.elements.refresh.value);await save(draft);if(active){form.closest('dialog').close();toast(demo?'Demo layout updated for this visit.':'Dashboard layout saved.');lastSuccess=null;refreshNetwork();await refresh();}}catch(error){form.querySelector('.error').textContent=error.message;}finally{saving=false;button.disabled=false;}};
+    form.onsubmit=async e=>{e.preventDefault();if(saving||!active)return;saving=true;const button=form.querySelector('[type=submit]');button.disabled=true;try{draft.refresh=Number(form.elements.refresh.value);if(customPageId&&!['usage','billing'].includes(customPageId)){const widgets=draft.widgets.filter(w=>w.visible);if(!widgets.length)throw Error('Choose at least one tile');await personal.savePage(customPageId,widgets);await save({...layout,refresh:draft.refresh});}else await save(customPageId?{...layout,refresh:draft.refresh}:draft);if(active){form.closest('dialog').close();toast(demo?'Demo layout updated for this visit.':'Dashboard layout saved.');lastSuccess=null;refreshNetwork();await refresh();}}catch(error){form.querySelector('.error').textContent=error.message;}finally{saving=false;button.disabled=false;}};
   };
   const onVisible=()=>{if(!document.hidden){refresh();refreshNetwork();refreshQuota();}};document.addEventListener('visibilitychange',onVisible);
-  (async()=>{try{if(!demo){const stored=await api('dashboard');if(!active)return;if(Array.isArray(stored.widgets)&&[definitions.length,definitions.length-1].includes(stored.widgets.length)){layout=stored;if(!layout.widgets.some(w=>w.id==='codex'))layout.widgets.splice(6,0,{id:'codex',width:6,visible:true});if(layout.musicPlaylist===undefined)layout.musicPlaylist='';if(layout.cockpitVersion!==1){layout.cockpitVersion=1;layout.widgets=[...front.map(id=>({...layout.widgets.find(w=>w.id===id),visible:true})),...layout.widgets.filter(w=>!front.includes(w.id))];}}}}catch(error){if(active)toast('Could not load saved layout: '+error.message);}if(active){music();apply();schedule();refresh();refreshNetwork();refreshQuota();if(!demo){networkTimer=setInterval(refreshNetwork,5000);quotaTimer=setInterval(refreshQuota,60000);}}})();
+  (async()=>{try{if(!demo){await personal.load();const stored=await api('dashboard');if(!active)return;if(Array.isArray(stored.widgets)&&stored.widgets.length>=13&&stored.widgets.length<=definitions.length){layout=stored;for(const [id,,width] of definitions)if(!layout.widgets.some(w=>w.id===id))layout.widgets.push({id,width,visible:true});if(!layout.widgets.some(w=>w.id==='codex'))layout.widgets.splice(6,0,{id:'codex',width:6,visible:true});if(layout.musicPlaylist===undefined)layout.musicPlaylist='';if(layout.cockpitVersion!==1){layout.cockpitVersion=1;layout.widgets=[...front.map(id=>({...layout.widgets.find(w=>w.id===id),visible:true})),...layout.widgets.filter(w=>!front.includes(w.id))];}}}}catch(error){if(active)toast('Could not load saved layout: '+error.message);}if(active){music();apply();renderBills(cards.get('bills'),personal.data.bills,esc,()=>personal.bills());
+      if(connected('hostinger')&&!demo)api('hostinger?view=billing').then(r=>{if(active)renderHostinger(cards.get('hostinger'),r.data,esc);}).catch(e=>{if(active)cards.get('hostinger').textContent=e.message;});else cards.get('hostinger').innerHTML='<h2>Hostinger billing</h2><p>Connect Hostinger to see renewal dates and amounts.</p>';
+      if(connected('jellyfin')&&!demo)api('jellyfin').then(r=>{if(active)renderMovies(cards.get('movies'),r.data.Items||[],esc);}).catch(e=>{if(active)cards.get('movies').textContent=e.message;});
+      schedule();refresh();refreshNetwork();refreshQuota();if(!demo){networkTimer=setInterval(refreshNetwork,5000);quotaTimer=setInterval(refreshQuota,60000);}}})();
   return ()=>{active=false;disposeMusic();clearInterval(timer);clearInterval(networkTimer);clearInterval(quotaTimer);document.removeEventListener('visibilitychange',onVisible);};
 }

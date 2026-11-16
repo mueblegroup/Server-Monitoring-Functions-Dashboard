@@ -140,7 +140,7 @@ Use **Full screen** in the header for the browser Fullscreen API and screen-fit 
 
 ### Physical host temperature and fan sensors
 
-Small temperature/fan badges appear in **Server health**. They show the highest reported temperature and fan RPM; tap either for individual labeled readings. These values require physical hardware sensors, not a VM's virtual CPU. The included Python collector reads Linux `/sys/class/hwmon` without running commands, installing sensor drivers, or accepting writes. Missing fan tachometer/temperature support remains unavailable.
+Small temperature/fan badges appear in **Server health**. They show the highest reported temperature and fan speed (RPM or percentage, as reported); tap either for individual labeled readings. These values require physical hardware sensors, not a VM's virtual CPU. The included Python collector reads Linux `/sys/class/hwmon` without installing sensor drivers or accepting writes. Optional local IPMI support runs only the fixed read command described below. Missing fan tachometer/temperature support remains unavailable.
 
 From the Orbit container, copy the two deployment files to the Proxmox host:
 
@@ -200,3 +200,32 @@ Proxmox cards show selected host CPU usage/model/core count, memory and swap, up
 - [Open-Meteo](https://open-meteo.com/en/docs)
 - [Stripe signatures](https://docs.stripe.com/webhooks/signature)
 
+
+## Custom pages, movies and billing
+
+Open **Pages** in the dashboard toolbar. **OpenAI usage** (#usage) has its own fit-screen page with subscription-limit gauges. **Billing** (#billing) shows Hostinger and recurring bills. Add a named custom page with any selection of supported tiles; use **Customize** on that page to resize and reorder them. Pages and fixed bills are saved per Orbit account. The Pages dialog also allows renaming and deleting custom pages.
+
+The landscape overview splits the previous music area into Spotify/YouTube and a Jellyfin movie suggestion with background artwork, title and year. **Next suggestion** cycles the fetched library recommendations. Artwork passes through an authenticated Orbit endpoint; the Jellyfin API token stays on the server.
+
+**Hostinger billing** joins VPS subscription IDs with GET /api/billing/v1/subscriptions. Renewal prices are converted from provider cents to currency units. Auto-renewing subscriptions use next_billing_at; others show expires_at. If subscription access fails, servers remain available and missing prices/dates are marked unavailable. The countdown ring estimates cycle progress from the subscription billing period; it is not a payment-status indicator. No billing operations are performed.
+
+In **Recurring bills → Manage**, add/edit/delete a name, fixed amount, currency, monthly/yearly frequency and due date. Monthly dates such as the 31st clamp to the last day of short months and return to the 31st in later months. Yearly fees show amount/12 per month; monthly fees show amount*12 per year. Cycle allocation is prorated by actual calendar days between due dates, not metered consumption or a payment ledger. On the due date the ring reaches 100%; on the following day it advances to the next scheduled cycle. Different currencies are never summed.
+
+### HP ProLiant DL380 G6 / iLO 2
+
+This generation has temperature and fan monitoring through iLO 2. Linux hwmon may expose CPU temperatures; chassis sensors may require IPMI. On the physical Proxmox host, inspect availability first:
+
+```sh
+apt update
+apt install ipmitool lm-sensors
+sensors
+ipmitool -I open sensor
+```
+
+To include those local IPMI readings in the existing collector, set SENSOR_IPMI=true in /etc/orbit-sensors.env and restart orbit-sensors. The collector runs ipmitool -I open sensor with an eight-second timeout, performs no fan-control commands, and preserves RPM versus percentage readings. A reading is only shown if the hardware supplies a valid value. Some firmware/sensors will not expose RPM. iLO 2 has no modern Redfish API.
+
+The systemd collector runs as nobody, so IPMI will only work if that service account has read access to /dev/ipmi0. Check ls -l /dev/ipmi0 and test the command as the service account. Configure a dedicated device group and a persistent udev owner/group rule if necessary, then add that group using a systemd SupplementaryGroups override. Do not make the IPMI device world-writable or run the web collector as root. If device access or firmware support is absent, hwmon remains available. This must be installed on the physical host, not inside the Orbit container.
+
+### YouTube Music account playback
+
+Gmail sign-in and YouTube Premium work in the official YouTube Music app/site. The official YouTube APIs do not offer a full YouTube Music account playback SDK comparable to Spotify. Orbit can embed supported public/unlisted playlists with the visible YouTube player; Google OAuth alone does not turn that into your Premium Music library or guarantee ad-free/background playback. Use **Open YouTube Music** for the signed-in experience, or Spotify Premium for the integrated custom player. Orbit does not collect Google passwords or browser cookies.

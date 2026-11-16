@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import socket
+import subprocess
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 
@@ -27,6 +28,28 @@ def read_sensors(root=Path('/sys/class/hwmon')):
                         result[key].append({'label': f'{chip}: {label}', unit: number})
                 except (OSError, ValueError):
                     continue
+    if os.environ.get('SENSOR_IPMI', '').lower() == 'true':
+        try:
+            output = subprocess.run(['ipmitool', '-I', 'open', 'sensor'],
+                                    capture_output=True, text=True, timeout=8, check=True).stdout
+            for line in output.splitlines():
+                fields = [field.strip() for field in line.split('|')]
+                if len(fields) < 4 or fields[3].lower() not in ('ok', 'cr', 'nc', 'nr'):
+                    continue
+                try:
+                    value = float(fields[1])
+                except ValueError:
+                    continue
+                label = 'IPMI: ' + fields[0][:80]
+                unit = fields[2].lower()
+                if unit == 'degrees c' and -50 <= value <= 200:
+                    result['temperatures'].append({'label': label, 'celsius': value})
+                elif unit == 'rpm' and 0 <= value <= 100000:
+                    result['fans'].append({'label': label, 'rpm': value})
+                elif unit in ('percent', '%') and 'fan' in fields[0].lower() and 0 <= value <= 100:
+                    result['fans'].append({'label': label, 'percent': value})
+        except (OSError, subprocess.SubprocessError):
+            pass  # hwmon still works when IPMI is unavailable or access is denied.
     return result
 
 

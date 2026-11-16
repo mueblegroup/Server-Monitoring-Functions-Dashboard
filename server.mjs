@@ -7,6 +7,8 @@ import { DatabaseSync } from 'node:sqlite';
 import { integration, configured } from './services.mjs';
 import {codexUsage} from './codex-usage.mjs';
 import {createSpotify} from './spotify.mjs';
+import {validateWorkspace,tileIds} from './workspace.mjs';
+import {jellyfinImage} from './services.mjs';
 
 const root = dirname(fileURLToPath(import.meta.url));
 mkdirSync(resolve(root, 'data'), {recursive:true, mode:0o700});
@@ -17,6 +19,7 @@ CREATE TABLE IF NOT EXISTS sessions(hash TEXT PRIMARY KEY, email TEXT, csrf TEXT
 CREATE TABLE IF NOT EXISTS audit(id INTEGER PRIMARY KEY, time TEXT, email TEXT, service TEXT, action TEXT, outcome TEXT);
 CREATE TABLE IF NOT EXISTS events(id TEXT PRIMARY KEY, time TEXT, type TEXT, amount INTEGER, currency TEXT);`);
 db.exec('CREATE TABLE IF NOT EXISTS dashboard_preferences(email TEXT PRIMARY KEY, value TEXT NOT NULL)');
+db.exec('CREATE TABLE IF NOT EXISTS personal_workspace(email TEXT PRIMARY KEY,value TEXT NOT NULL)');
 const digest = s => createHash('sha256').update(s).digest('hex');
 const token = () => randomBytes(32).toString('hex');
 const admin = process.env.ADMIN_EMAIL;
@@ -34,6 +37,8 @@ files['/screens.mjs']=['public/screens.mjs','text/javascript'];
 files['/screens.css']=['public/screens.css','text/css'];
 files['/trends.mjs']=['public/trends.mjs','text/javascript'];
 files['/spotify-player.mjs']=['public/spotify-player.mjs','text/javascript'];
+files['/billing.mjs']=['public/billing.mjs','text/javascript'];
+files['/personal.mjs']=['public/personal.mjs','text/javascript'];
 async function body(req) {
   const chunks=[]; let size=0;
   for await (const chunk of req) { size+=chunk.length; if(size>65536) throw Object.assign(new Error('Request too large'),{status:413}); chunks.push(chunk); }
@@ -103,10 +108,13 @@ export async function handler(req,res){
       const row=db.prepare('SELECT value FROM dashboard_preferences WHERE email=?').get(session.email);
       send(200,row?JSON.parse(row.value):{});return;
     }
+    if(path==='/api/workspace'&&req.method==='GET'){const row=db.prepare('SELECT value FROM personal_workspace WHERE email=?').get(session.email);send(200,row?JSON.parse(row.value):{pages:[],bills:[]});return;}
+    if(path==='/api/workspace'&&req.method==='POST'){const value=validateWorkspace(JSON.parse(await body(req)));db.prepare('INSERT INTO personal_workspace VALUES(?,?) ON CONFLICT(email) DO UPDATE SET value=excluded.value').run(session.email,JSON.stringify(value));send(200,value);return;}
+    if(path==='/api/jellyfin/image'&&req.method==='GET'){const image=await jellyfinImage(url.searchParams.get('id'),url.searchParams.get('kind'));res.writeHead(200,{'Content-Type':image.type,'Cache-Control':'private, max-age=300'});res.end(image.bytes);return;}
     if(path==='/api/dashboard'&&req.method==='POST'){
       const b=JSON.parse(await body(req));
-      const valid=['cpu','memory','storage','guests','health','clock','weather','infrastructure','network','music','stripe','movies','launch','codex'];
-      if(!b||!Array.isArray(b.widgets)||![valid.length,valid.length-1].includes(b.widgets.length)||new Set(b.widgets.map(w=>w?.id)).size!==b.widgets.length||b.widgets.some(w=>!w||!valid.includes(w.id)||typeof w.visible!=='boolean'||![4,6,12].includes(w.width))||valid.filter(id=>id!=='codex').some(id=>!b.widgets.some(w=>w.id===id))||![0,15,30,60].includes(b.refresh)||typeof b.node!=='string'||!/^[-\w.]{0,100}$/.test(b.node))fail('Invalid dashboard layout');
+      const valid=tileIds;
+      if(!b||!Array.isArray(b.widgets)||b.widgets.length<13||b.widgets.length>valid.length||new Set(b.widgets.map(w=>w?.id)).size!==b.widgets.length||b.widgets.some(w=>!w||!valid.includes(w.id)||typeof w.visible!=='boolean'||![4,6,12].includes(w.width))||valid.filter(id=>!['codex','bills','hostinger'].includes(id)).some(id=>!b.widgets.some(w=>w.id===id))||![0,15,30,60].includes(b.refresh)||typeof b.node!=='string'||!/^[-\w.]{0,100}$/.test(b.node))fail('Invalid dashboard layout');
       if(b.musicPlaylist!==undefined&&(typeof b.musicPlaylist!=='string'||!/^[-\w]{0,150}$/.test(b.musicPlaylist)))fail('Invalid YouTube playlist ID');
       const value={widgets:b.widgets.map(({id,visible,width})=>({id,visible,width})),node:b.node,refresh:b.refresh,...(b.musicPlaylist!==undefined?{musicPlaylist:b.musicPlaylist}:{}),...(b.cockpitVersion===1?{cockpitVersion:1}:{})};
       db.prepare('INSERT INTO dashboard_preferences VALUES(?,?) ON CONFLICT(email) DO UPDATE SET value=excluded.value').run(session.email,JSON.stringify(value));
