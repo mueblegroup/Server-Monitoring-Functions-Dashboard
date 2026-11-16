@@ -7,7 +7,9 @@ const name=v=>requireValue(v,/^[a-zA-Z0-9_.-]{1,100}$/,'name');
 const domain=v=>requireValue(v,/^(?=.{1,253}$)(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,63}$/,'domain');
 function allowed(action,actions){if(!actions.includes(action))throw Object.assign(new Error('Unsupported action'),{status:400});}
 async function request(base,path,headers={},method='GET',data,form=false){
-  const error=message=>Object.assign(new Error(message),{status:502});
+  // A provider failure is a failed dependency, not an Orbit gateway outage.
+  // Keep JSON diagnostics separate from proxy-generated 502 error pages.
+  const error=message=>Object.assign(new Error(message),{status:424});
   let u;try{u=new URL(base);}catch{throw error('Invalid service base URL. Include http:// or https:// and the panel port.');}
   if(!['http:','https:'].includes(u.protocol)||u.username||u.password||u.search||u.hash)throw error('Invalid service URL. Use a base URL without credentials, query parameters or fragments.');
   let r;
@@ -15,10 +17,10 @@ async function request(base,path,headers={},method='GET',data,form=false){
   catch(e){
     const code=e.cause?.code;
     const hint=['ENOTFOUND','EAI_AGAIN'].includes(code)?'DNS lookup failed. Check that the container can resolve the panel hostname.':['ECONNREFUSED','ETIMEDOUT','EHOSTUNREACH','ENETUNREACH'].includes(code)?'Cannot reach the panel. Check its port, firewall and container routing.':/CERT|TLS|SELF_SIGNED/.test(code||'')?'TLS certificate verification failed. Install the private CA using NODE_EXTRA_CA_CERTS.':e.name==='TimeoutError'?'The service timed out. Check container connectivity.':'Connection failed. Check the URL, TLS certificate and network access.';
-    throw error(`${u.host}: ${hint}`);
+    throw error(`${u.host}: ${hint}${code?` (${code})`:''}`);
   }
   if(r.status>=300&&r.status<400)throw error(`${u.host} redirected the API request (HTTP ${r.status}). Use the panel API origin, not a login page or access-portal URL.`);
-  if(!r.ok)throw error(`${u.host} rejected the API request (HTTP ${r.status}). ${[401,403].includes(r.status)?'Check API credentials, permissions, IP allowlists and access policies.':r.status===404?'Check the base URL and panel port.':'Check the service or reverse proxy.'}`);
+  if(!r.ok)throw error(`${u.host} rejected ${method} ${path} (HTTP ${r.status}). ${[401,403].includes(r.status)?'Check API credentials, permissions, IP allowlists and access policies.':r.status===404?'Check the base URL and panel port.':'Check the service or reverse proxy.'}`);
   const text=await r.text();let value;
   try{value=text?JSON.parse(text):null;}catch{throw error(`${u.host} returned ${/^\s*</.test(text)?'HTML':'non-JSON content'} instead of API JSON. Check the panel base URL/port and any proxy or Cloudflare Access policy. Proxmox uses /api2/json; Hestia uses /api/. Do not put those paths in the base URL.`);}
   if(value?.success===false||value?.error)throw error(`${u.host} reported an API error. Check service permissions and configuration.`);return value;
@@ -28,7 +30,13 @@ export async function integration(service,b,method){
   if(service==='proxmox') {
     const call=(path,m='GET',data)=>request(env('PROXMOX_URL'),'/api2/json'+path,{Authorization:`PVEAPIToken=${env('PROXMOX_TOKEN_ID')}=${env('PROXMOX_TOKEN_SECRET')}`},m,data,true).then(x=>x.data);
     if(method==='GET'){
-      if(b.node&&b.vmid){const prefix=`/nodes/${name(b.node)}/${b.type==='qemu'?'qemu':'lxc'}/${id(b.vmid)}`;return call(prefix+(b.type==='qemu'?'/agent/network-get-interfaces':'/interfaces'));}
+      if(b.node&&b.vmid){
+        const prefix=`/nodes/${name(b.node)}/${b.type==='qemu'?'qemu':'lxc'}/${id(b.vmid)}`;
+        const data=await call(prefix+(b.type==='qemu'?'/agent/network-get-interfaces':'/interfaces'));
+        const interfaces=b.type==='qemu'?data?.result:data;
+        if(!Array.isArray(interfaces)||!interfaces.length)throw Object.assign(new Error(b.type==='qemu'?'No VM network interfaces returned. Ensure the VM is running and QEMU Guest Agent is installed, enabled in Proxmox, and running inside the guest.':'No container network interfaces returned. Ensure the CT is running and its network interface is configured.'),{status:424});
+        return interfaces;
+      }
       return call('/cluster/resources?type=vm');
     }
     allowed(b.action,['start','reboot','shutdown','stop','remove','create']);
@@ -42,7 +50,9 @@ export async function integration(service,b,method){
       return call(prefix,'POST',data);
     }
     const path=prefix+'/'+id(b.vmid);
-    return b.action==='remove'?call(path,'DELETE'):call(path+'/status/'+b.action,'POST',{});
+    const task=await (b.action==='remove'?call(path,'DELETE'):call(path+'/status/'+b.action,'POST',{}));
+    if(typeof task!=='string'||!task.startsWith('UPID:'))throw Object.assign(new Error('Proxmox returned no task ID. The action could not be verified; check the Proxmox task log before retrying.'),{status:424});
+    return task;
   }
   if(service==='hestia'){
     const call=async(command,args=[])=>{
