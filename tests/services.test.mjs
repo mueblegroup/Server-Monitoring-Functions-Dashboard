@@ -1,11 +1,41 @@
 import {test,after} from 'node:test';
 import assert from 'node:assert/strict';
 import {integration} from '../services.mjs';
+import https from 'node:https';
+import {EventEmitter} from 'node:events';
+import {Readable} from 'node:stream';
 const originalFetch=globalThis.fetch;
 const calls=[];
 Object.assign(process.env,{PROXMOX_URL:'https://pve.example:8006',PROXMOX_TOKEN_ID:'orbit@pve!api',PROXMOX_TOKEN_SECRET:'test',HESTIA_URL:'https://hestia.example:8083',HESTIA_ACCESS_KEY:'access',HESTIA_SECRET_KEY:'secret',HOSTINGER_TOKEN:'test',CLOUDFLARE_TOKEN:'test',CLOUDFLARE_ACCOUNT_ID:'account'});
 function mock(responses){calls.length=0;globalThis.fetch=async(url,options)=>{calls.push({url,...options});return new Response(JSON.stringify(responses.shift()),{status:200});};}
 after(()=>{globalThis.fetch=originalFetch;});
+test('TLS opt-out applies only to private servers and preserves authenticated POST bodies',async()=>{
+ const originalRequest=https.request,previous=process.env.SERVER_TLS_VERIFY,requests=[];
+ try{
+  process.env.SERVER_TLS_VERIFY='false';
+  https.request=(url,options,callback)=>{
+   const req=new EventEmitter();
+   req.end=body=>{
+    requests.push({url,options,body});
+    const res=Readable.from([Buffer.from(JSON.stringify({data:'UPID:test'}))]);
+    res.statusCode=200;res.headers={'content-type':'application/json'};callback(res);
+   };
+   return req;
+  };
+  assert.equal(await integration('proxmox',{node:'pve',type:'qemu',vmid:'105',action:'start'},'POST'),'UPID:test');
+  assert.equal(requests[0].options.rejectUnauthorized,false);
+  assert.equal(requests[0].options.headers.Authorization,'PVEAPIToken=orbit@pve!api=test');
+  assert.equal(requests[0].options.headers['Content-Length'],0);
+  mock([{id:1}]);
+  await integration('hostinger',{},'GET');
+  assert.equal(calls.length,1);assert.equal(requests.length,1);
+  process.env.SERVER_TLS_VERIFY='true';mock([{data:[]}]);
+  await integration('proxmox',{},'GET');assert.equal(calls.length,1);assert.equal(requests.length,1);
+ }finally{
+  https.request=originalRequest;
+  if(previous===undefined)delete process.env.SERVER_TLS_VERIFY;else process.env.SERVER_TLS_VERIFY=previous;
+ }
+});
 test('Proxmox token and unprivileged CT allocation are sent correctly',async()=>{
  mock([{data:'UPID:test'}]);
  await integration('proxmox',{action:'create',type:'lxc',node:'pve',vmid:'300',name:'test',cores:'2',memory:'512',disk:'8',storage:'local-lvm',bridge:'vmbr0',template:'local:vztmpl/debian.tar.zst',password:'disposable-test-password'},'POST');
