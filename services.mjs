@@ -1,4 +1,5 @@
 import https from 'node:https';
+import {collectPfSense} from './pfsense.mjs';
 const env=k=>process.env[k];
 // Only configured private server integrations may opt out of certificate checks.
 function serverRequest(url,options){
@@ -25,7 +26,7 @@ function serverRequest(url,options){
   });
 }
 const needs={proxmox:['PROXMOX_URL','PROXMOX_TOKEN_ID','PROXMOX_TOKEN_SECRET'],hestia:['HESTIA_URL','HESTIA_ACCESS_KEY','HESTIA_SECRET_KEY'],cloudflare:['CLOUDFLARE_TOKEN','CLOUDFLARE_ACCOUNT_ID'],hostinger:['HOSTINGER_TOKEN'],jellyfin:['JELLYFIN_URL','JELLYFIN_TOKEN'],pfsense:['PFSENSE_METRICS_URL','PFSENSE_METRICS_TOKEN']};
-export const configured=()=>Object.fromEntries(Object.entries(needs).map(([k,v])=>[k,v.every(x=>!!env(x))]));
+export const configured=()=>Object.fromEntries(Object.entries(needs).map(([k,v])=>[k,k==='pfsense'&&env('PFSENSE_SNMP_HOST')&&env('PFSENSE_SNMP_COMMUNITY')?true:v.every(x=>!!env(x))]));
 function requireValue(value,pattern,label){if(typeof value!=='string'||!pattern.test(value)) throw Object.assign(new Error(`Invalid ${label}`),{status:400});return value;}
 const id=v=>requireValue(String(v??''),/^\d{1,10}$/,'ID');
 const name=v=>requireValue(v,/^[a-zA-Z0-9_.-]{1,100}$/,'name');
@@ -138,5 +139,5 @@ export async function integration(service,b,method){
   }
   if(method!=='GET')throw Object.assign(new Error('Read-only integration'),{status:405});
   if(service==='jellyfin')return request(env('JELLYFIN_URL'),'/Items?IncludeItemTypes=Movie&Recursive=true&SortBy=Random&Limit=8&Fields=Overview',{Authorization:`MediaBrowser Token="${env('JELLYFIN_TOKEN')}"`},'GET',undefined,false,true);
-  if(service==='pfsense')return request(env('PFSENSE_METRICS_URL'),'',{Authorization:'Bearer '+env('PFSENSE_METRICS_TOKEN')},'GET',undefined,false,true);
+  if(service==='pfsense')return env('PFSENSE_SNMP_HOST')&&env('PFSENSE_SNMP_COMMUNITY')?collectPfSense():request(env('PFSENSE_METRICS_URL'),'',{Authorization:'Bearer '+env('PFSENSE_METRICS_TOKEN')},'GET',undefined,false,true);
 }
