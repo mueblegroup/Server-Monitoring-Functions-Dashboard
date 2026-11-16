@@ -69,7 +69,26 @@ node --check public/app.js
 
 Tests cover private routes, login/origin safeguards, 90-day cookies, CSRF, confirmation, GET mutation restrictions, failed-action auditing, webhook signing/deduplication, secret exposure and logout. Live credentials are absent: validate read-only calls first, then use disposable resources to verify mutations.
 
-Phase one is not production-verified against your services. Remaining: actual provider payload validation, account management/MFA/recovery, provider task tracking, scheduled monitoring, and a pfSense collector matched to your installation.
+Phase one is not production-verified against your services. Remaining: actual provider payload validation, account management/MFA/recovery, provider task tracking, and scheduled monitoring.
+
+## pfSense SNMP metrics
+
+Orbit reads pfSense SNMP v2c directly; no metrics token, REST API package, or separate HTTP collector is required. On pfSense, enable **Services > SNMP**, MibII and Host Resources, bind to an internal interface, and allow UDP 161 from the Orbit container. Enable UCD as desired. Configure a private read community.
+
+On Debian/Ubuntu, install the client tools with `apt install snmp`. The Docker image includes them. Set these in `.env`, then restart Orbit:
+
+```dotenv
+PFSENSE_SNMP_HOST=pfsense.wildoffice.lan
+PFSENSE_SNMP_PORT=161
+PFSENSE_SNMP_COMMUNITY=YOUR_READ_COMMUNITY
+PFSENSE_SNMP_INTERFACE=pppoe2
+```
+
+Use the actual internet-facing interface name from **Status > Interfaces**; `pppoe2` is the initial default for this installation. Orbit discovers its current SNMP index by name on each poll, so it does not hardcode index 9. When a reconnect changes the interface name itself, update the setting. Do not add parent VLAN/physical-interface counters to PPPoE counters, as that double counts traffic.
+
+The Overview network widget shows WAN receive/download and transmit/upload rates, interface status, mean CPU load from Host Resources, physical memory usage, and firewall uptime when exposed by SNMP. It polls every 5 seconds while visible; the first sample establishes a baseline and rates appear on the next poll. Values are SNMP samples, not an internet speed test. CPU and memory accounting may differ from the pfSense GUI. Missing metrics display as unavailable. Counter resets, reboots, interface index changes, and long sampling gaps rebaseline rates. 64-bit interface counters are preferred; a warning marks fallback to 32-bit counters, which can undercount across wraps on fast links.
+
+The community remains server-side and is passed through a temporary owner-readable SNMP configuration file, not command arguments. No write SNMP operations are used. Existing `PFSENSE_METRICS_URL`/`PFSENSE_METRICS_TOKEN` collectors remain supported if direct SNMP is not configured.
 
 ## Customizable overview and host statistics
 
