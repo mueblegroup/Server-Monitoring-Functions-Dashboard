@@ -92,6 +92,57 @@ The community remains server-side and is passed through a temporary owner-readab
 
 ## Customizable overview and host statistics
 
+### Music and fullscreen
+
+The music card is first on new layouts. Older layouts are promoted once when adding playlist support; afterward the normal Customize controls can move it. Choose **Connect playlist**, paste a YouTube Music/YouTube playlist Share link, and save. The playlist must be public or unlisted and allow embedding. Playback uses the YouTube privacy-enhanced embedded player with no autoplay; click Play. This connects a playlist, not the full YouTube Music account/library. No API key, password, cookies, or OAuth token is needed. Private playlists and restricted tracks may require opening the official YouTube Music app instead.
+
+Use **Full screen** in the header for the browser Fullscreen API and screen-fit layout. Exit with the same button or Escape. Landscape orientation uses the extra width automatically; orientation is not forcibly locked. Browsers without Fullscreen API support can use their own fullscreen command or Add to Home Screen.
+
+### Physical host temperature and fan sensors
+
+Small temperature/fan badges appear in **Server health**. They show the highest reported temperature and fan RPM; tap either for individual labeled readings. These values require physical hardware sensors, not a VM's virtual CPU. The included Python collector reads Linux `/sys/class/hwmon` without running commands, installing sensor drivers, or accepting writes. Missing fan tachometer/temperature support remains unavailable.
+
+From the Orbit container, copy the two deployment files to the Proxmox host:
+
+```sh
+cd /opt/orbit
+scp deploy/host-sensors.py deploy/orbit-sensors.service root@10.16.1.153:/tmp/
+```
+
+On the **Proxmox host**:
+
+```sh
+install -d /opt/orbit-sensors
+install -m 0644 /tmp/host-sensors.py /opt/orbit-sensors/host-sensors.py
+install -m 0644 /tmp/orbit-sensors.service /etc/systemd/system/orbit-sensors.service
+openssl rand -hex 32
+nano /etc/orbit-sensors.env
+```
+
+Set the following, using the generated token:
+
+```dotenv
+SENSOR_HOST=10.16.1.153
+SENSOR_PORT=9109
+SENSOR_NODE=proxmox-main
+SENSOR_TOKEN=YOUR_GENERATED_SECRET
+```
+
+```sh
+chmod 600 /etc/orbit-sensors.env
+systemctl daemon-reload
+systemctl enable --now orbit-sensors
+```
+
+Keep TCP 9109 reachable only from the Orbit container on the internal network. This collector uses HTTP and bearer authentication; a trusted HTTPS reverse proxy can be used when needed. The service runs as `nobody`, with read-only system protection. On Orbit, add to `.env` and restart:
+
+```dotenv
+PROXMOX_SENSORS_URL=http://10.16.1.153:9109
+PROXMOX_SENSORS_TOKEN=YOUR_GENERATED_SECRET
+```
+
+The collector's `SENSOR_NODE` must match the selected Proxmox node. A mismatched or unavailable collector will not replace CPU, memory, or storage data. This first collector configuration supports one physical host; selecting another node shows no hardware reading rather than presenting the wrong host's sensors.
+
 The authenticated workspace defaults to **Fit screen** mode: cards are packed into viewport-sized screens, with Previous/Next buttons, horizontal swipes and arrow keys. Packing adapts to viewport width/height and preserves the chosen widget order and widths. At screen boundaries, swipes/arrow keys continue to the next service page. Resource lists, movies and activity lists have their own pagination. Oversized card details and dialogs remain internally scrollable so content is not clipped. Use **Expand view** in the header to restore the full scrolling layout; this display choice is remembered on the current device. Login remains a normal scrolling page.
 
 Use **Customize** on Overview to show or hide widgets, move them up/down, and choose compact, half-width, or full-width cards. Cards stack on phones and use two columns on tablets. The layout, selected Proxmox node, and refresh interval are saved per account in SQLite and follow the user across browsers. **Reset layout** restores defaults when saved. Existing databases gain the preferences table automatically at startup.
