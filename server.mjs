@@ -29,6 +29,7 @@ const cookie = (value,age) => `orbit=${value}; Path=/; HttpOnly; SameSite=Strict
 const files = {'/':['public/index.html','text/html'], '/app.js':['public/app.js','text/javascript'], '/dashboard.mjs':['public/dashboard.mjs','text/javascript'], '/response.mjs':['public/response.mjs','text/javascript'], '/style.css':['public/style.css','text/css'], '/manifest.webmanifest':['public/manifest.webmanifest','application/manifest+json'], '/icon.svg':['public/icon.svg','image/svg+xml']};
 files['/screens.mjs']=['public/screens.mjs','text/javascript'];
 files['/screens.css']=['public/screens.css','text/css'];
+files['/trends.mjs']=['public/trends.mjs','text/javascript'];
 async function body(req) {
   const chunks=[]; let size=0;
   for await (const chunk of req) { size+=chunk.length; if(size>65536) throw Object.assign(new Error('Request too large'),{status:413}); chunks.push(chunk); }
@@ -92,7 +93,7 @@ export async function handler(req,res){
       const valid=['cpu','memory','storage','guests','health','clock','weather','infrastructure','network','music','stripe','movies','launch'];
       if(!b||!Array.isArray(b.widgets)||b.widgets.length!==valid.length||new Set(b.widgets.map(w=>w?.id)).size!==valid.length||b.widgets.some(w=>!w||!valid.includes(w.id)||typeof w.visible!=='boolean'||![4,6,12].includes(w.width))||![0,15,30,60].includes(b.refresh)||typeof b.node!=='string'||!/^[-\w.]{0,100}$/.test(b.node))fail('Invalid dashboard layout');
       if(b.musicPlaylist!==undefined&&(typeof b.musicPlaylist!=='string'||!/^[-\w]{0,150}$/.test(b.musicPlaylist)))fail('Invalid YouTube playlist ID');
-      const value={widgets:b.widgets.map(({id,visible,width})=>({id,visible,width})),node:b.node,refresh:b.refresh,...(b.musicPlaylist!==undefined?{musicPlaylist:b.musicPlaylist}:{})};
+      const value={widgets:b.widgets.map(({id,visible,width})=>({id,visible,width})),node:b.node,refresh:b.refresh,...(b.musicPlaylist!==undefined?{musicPlaylist:b.musicPlaylist}:{}),...(b.cockpitVersion===1?{cockpitVersion:1}:{})};
       db.prepare('INSERT INTO dashboard_preferences VALUES(?,?) ON CONFLICT(email) DO UPDATE SET value=excluded.value').run(session.email,JSON.stringify(value));
       send(200,value);return;
     }
