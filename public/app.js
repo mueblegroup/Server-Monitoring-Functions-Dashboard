@@ -1,9 +1,10 @@
+import {readApiResponse} from './response.mjs';
 const $=s=>document.querySelector(s);
 const app=$('#app'),nav=$('#nav'),modal=$('#modal');
 const pages=[['overview','⌘','Overview'],['proxmox','▣','Proxmox'],['hestia','⌂','Hestia'],['cloudflare','☁','Cloudflare'],['hostinger','▥','Hostinger'],['media','♫','Media'],['activity','◷','Activity'],['settings','⚙','Connect']];
 let session=null,demo=false,page='overview',generation=0;
 const esc=s=>String(s??'').replace(/[&<>"']/g,x=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[x]));
-async function api(path,options={}){const r=await fetch('/api/'+path,{...options,headers:{'Content-Type':'application/json',...(session?{'X-CSRF-Token':session.csrf}:{}),...options.headers}});const data=await r.json();if(!r.ok){if(r.status===401&&session){session=null;login();}throw Error(data.error);}return data;}
+async function api(path,options={}){const r=await fetch('/api/'+path,{...options,headers:{'Content-Type':'application/json',...(session?{'X-CSRF-Token':session.csrf}:{}),...options.headers}});const data=await readApiResponse(r,path);if(!r.ok){if(r.status===401&&session){session=null;login();}throw Error(data.error||`Orbit request failed (HTTP ${r.status}).`);}return data;}
 function toast(text){$('#toast').textContent=text;$('#toast').style.display='block';clearTimeout(toast.timer);toast.timer=setTimeout(()=>$('#toast').style.display='none',6500);}
 const status=s=>`<span class="status ${s?'':'off'}">${s?'<i class="dot"></i>Configured':'○ Not connected'}</span>`;
 const card=(title,body,span=4,extra='')=>`<section class="card span${span} ${extra}"><div class="card-head"><h2>${title}</h2></div>${body}</section>`;
