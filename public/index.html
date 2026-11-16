@@ -1,9 +1,10 @@
 <!doctype html>
-<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#0c1017"><meta name="description" content="Your private infrastructure command center"><title>Orbit · Command Center</title><link rel="icon" href="/icon.svg"><link rel="manifest" href="/manifest.webmanifest"><link rel="stylesheet" href="/style.css"><link rel="stylesheet" href="/screens.css"><script type="module" src="/app.js"></script></head>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#0c1017"><meta name="description" content="Your private infrastructure command center"><title>Orbit · Command Center</title><link rel="icon" href="/icon.svg"><link rel="manifest" href="/manifest.webmanifest"><link rel="stylesheet" href="/style.css"><link rel="stylesheet" href="/screens.css"><link rel="stylesheet" href="/motion.css"><script type="module" src="/app.js"></script></head>
 <body>
+<div id="page-loader" class="page-loader" role="progressbar" aria-label="Loading" hidden></div>
 <div class="ambient"></div>
 <header><a class="brand" href="#overview"><span class="brand-icon">◈</span> ORBIT <span class="brand-sub">CONTROL CENTER</span></a><div class="header-right"><span id="connection" class="badge">PRIVATE WORKSPACE</span><button id="signout" class="icon-button" aria-label="Sign out" hidden>↗</button></div></header>
-<main id="app"></main>
+<main id="app"><div class="loading-state boot-loading" role="status"><span class="loading-orbit" aria-hidden="true"></span><span>Opening Orbit<span class="loading-dots" aria-hidden="true">…</span></span></div></main>
 <nav id="nav" aria-label="Dashboard pages"></nav>
 <dialog id="modal"><div id="modal-content"></div><button class="close" id="close-modal" aria-label="Close dialog">×</button></dialog>
 <div id="toast" role="status" aria-live="polite"></div>
