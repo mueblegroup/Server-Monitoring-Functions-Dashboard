@@ -14,12 +14,17 @@ test('WAN rates use byte deltas and monotonic time; first sample is unknown',()=
  const current={...previous,time:6000,agentTicks:600,rx:'9007199264740993',tx:'15000000'};
  assert.deepEqual(trafficRates(null,current),{downloadMbps:null,uploadMbps:null});
  assert.deepEqual(trafficRates(previous,current),{downloadMbps:16,uploadMbps:8});
- for(const changes of [{index:'10'},{agentTicks:0},{discontinuity:'500'},{rx:'1'},{bits:32},{up:false},{time:200000}])assert.equal(trafficRates(previous,{...current,...changes}).downloadMbps,null);
+ for(const changes of [{index:'10'},{agentTicks:0},{discontinuity:'500'},{rx:'1'},{bits:32},{time:200000}])assert.equal(trafficRates(previous,{...current,...changes}).downloadMbps,null);
+ assert.deepEqual(trafficRates({...previous,up:false},{...current,up:false}),{downloadMbps:16,uploadMbps:8});
 });
 test('Host Resources aggregates CPU and uses physical RAM allocation units',()=>{
  const storage={[root+'.2.1']:'.1.3.6.1.2.1.25.2.1.2',[root+'.4.1']:'4096',[root+'.5.1']:'1000',[root+'.6.1']:'310'};
  assert.deepEqual(hostMetrics({'1.2.1':'2','1.2.2':'4'},storage),{cpuPercent:3,memory:{usedBytes:1269760,totalBytes:4096000,percent:31}});
  assert.deepEqual(hostMetrics({},{}),{cpuPercent:null,memory:null});
+});
+test('System-wide UCD RAM is preferred over Host Resources pool accounting',()=>{
+ const memory={'1.3.6.1.4.1.2021.4.5.0':'1000','1.3.6.1.4.1.2021.4.6.0':'400','1.3.6.1.4.1.2021.4.14.0':'100','1.3.6.1.4.1.2021.4.15.0':'200'};
+ assert.deepEqual(hostMetrics({}, {}, memory).memory,{usedBytes:307200,totalBytes:1024000,percent:30});
 });
 test('Direct SNMP configuration enables pfSense without an HTTP token',()=>{assert.equal(configured().pfsense,true);});
 test('Collector discovers index by name, protects the community, caches and cleans up',async()=>{

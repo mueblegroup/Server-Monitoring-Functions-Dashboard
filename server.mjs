@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { randomBytes, scryptSync, timingSafeEqual, createHash, createHmac } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { integration, configured } from './services.mjs';
+import {codexUsage} from './codex-usage.mjs';
 
 const root = dirname(fileURLToPath(import.meta.url));
 mkdirSync(resolve(root, 'data'), {recursive:true, mode:0o700});
@@ -84,14 +85,15 @@ export async function handler(req,res){
     if(!session) fail('Sign in to continue',401);
     if(req.method!=='GET'&&req.headers['x-csrf-token']!==session.csrf) fail('Session verification failed',403);
     if(path==='/api/session'&&req.method==='GET'){send(200,{email:session.email,csrf:session.csrf,configured:configured()});return;}
+    if(path==='/api/codex-usage'&&req.method==='GET'){send(200,await codexUsage());return;}
     if(path==='/api/dashboard'&&req.method==='GET'){
       const row=db.prepare('SELECT value FROM dashboard_preferences WHERE email=?').get(session.email);
       send(200,row?JSON.parse(row.value):{});return;
     }
     if(path==='/api/dashboard'&&req.method==='POST'){
       const b=JSON.parse(await body(req));
-      const valid=['cpu','memory','storage','guests','health','clock','weather','infrastructure','network','music','stripe','movies','launch'];
-      if(!b||!Array.isArray(b.widgets)||b.widgets.length!==valid.length||new Set(b.widgets.map(w=>w?.id)).size!==valid.length||b.widgets.some(w=>!w||!valid.includes(w.id)||typeof w.visible!=='boolean'||![4,6,12].includes(w.width))||![0,15,30,60].includes(b.refresh)||typeof b.node!=='string'||!/^[-\w.]{0,100}$/.test(b.node))fail('Invalid dashboard layout');
+      const valid=['cpu','memory','storage','guests','health','clock','weather','infrastructure','network','music','stripe','movies','launch','codex'];
+      if(!b||!Array.isArray(b.widgets)||![valid.length,valid.length-1].includes(b.widgets.length)||new Set(b.widgets.map(w=>w?.id)).size!==b.widgets.length||b.widgets.some(w=>!w||!valid.includes(w.id)||typeof w.visible!=='boolean'||![4,6,12].includes(w.width))||valid.filter(id=>id!=='codex').some(id=>!b.widgets.some(w=>w.id===id))||![0,15,30,60].includes(b.refresh)||typeof b.node!=='string'||!/^[-\w.]{0,100}$/.test(b.node))fail('Invalid dashboard layout');
       if(b.musicPlaylist!==undefined&&(typeof b.musicPlaylist!=='string'||!/^[-\w]{0,150}$/.test(b.musicPlaylist)))fail('Invalid YouTube playlist ID');
       const value={widgets:b.widgets.map(({id,visible,width})=>({id,visible,width})),node:b.node,refresh:b.refresh,...(b.musicPlaylist!==undefined?{musicPlaylist:b.musicPlaylist}:{}),...(b.cockpitVersion===1?{cockpitVersion:1}:{})};
       db.prepare('INSERT INTO dashboard_preferences VALUES(?,?) ON CONFLICT(email) DO UPDATE SET value=excluded.value').run(session.email,JSON.stringify(value));

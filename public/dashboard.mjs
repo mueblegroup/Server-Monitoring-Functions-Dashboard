@@ -1,7 +1,8 @@
 import {sampleTrend,sparkline} from './trends.mjs';
-const definitions=[['cpu','CPU usage',4],['memory','Memory & swap',4],['health','Server health',4],['storage','Storage pools',6],['guests','Containers & VMs',6],['clock','Clock',4],['weather','Weather',4],['infrastructure','Infrastructure',4],['network','Network',6],['music','Music',6],['stripe','Stripe events',4],['movies','Movies',4],['launch','Quick launch',4]];
+const definitions=[['cpu','CPU usage',4],['memory','Memory & swap',4],['health','Server health',4],['storage','Storage pools',6],['guests','Containers & VMs',6],['clock','Clock',4],['weather','Weather',4],['infrastructure','Infrastructure',4],['network','Network',6],['music','Music',6],['codex','OpenAI Codex usage',6],['stripe','Stripe events',4],['movies','Movies',4],['launch','Quick launch',4]];
 const front=['clock','music','cpu','memory','health','network'];
-export const defaultLayout=()=>({node:'',refresh:30,musicPlaylist:'',cockpitVersion:1,widgets:[...front.map(id=>definitions.find(d=>d[0]===id)),...definitions.filter(d=>!front.includes(d[0]))].map(([id,,width])=>({id,width,visible:true}))});
+const initialOrder=[...front,'codex'];
+export const defaultLayout=()=>({node:'',refresh:30,musicPlaylist:'',cockpitVersion:1,widgets:[...initialOrder.map(id=>definitions.find(d=>d[0]===id)),...definitions.filter(d=>!initialOrder.includes(d[0]))].map(([id,,width])=>({id,width,visible:true}))});
 export function playlistId(input){
   const value=String(input||'').trim();if(!value)return '';
   if(/^[-\w]{8,150}$/.test(value))return value;
@@ -15,7 +16,7 @@ const uptime=value=>{if(!numeric(value))return 'Unavailable';const h=Math.floor(
 export function mountDashboard({api,esc,connected,demo,openModal,toast}){
   const grid=document.querySelector('#app > .grid');
   if(!grid)return ()=>{};
-  let active=true,timer,networkTimer,networkBusy=false,busy=false,layout=defaultLayout(),latest=null,lastSuccess=null,saving=false;
+  let active=true,timer,networkTimer,quotaTimer,quotaBusy=false,networkBusy=false,busy=false,layout=defaultLayout(),latest=null,lastSuccess=null,saving=false;
   const cards=new Map();
   const existing=['clock','weather','infrastructure','network','music','stripe','movies','launch'];
   [...grid.children].forEach((el,index)=>{el.dataset.widget=existing[index];cards.set(existing[index],el);});
@@ -26,6 +27,22 @@ export function mountDashboard({api,esc,connected,demo,openModal,toast}){
     const el=document.createElement('section');el.className='card span4';el.dataset.widget=id;
     el.innerHTML=`<div class="card-head"><h2>${title}</h2><span class="label">PROXMOX</span></div><div class="host-metric">${connected('proxmox')?'Loading metrics...':'Connect Proxmox to see host metrics.'}</div>`;
     cards.set(id,el);grid.append(el);
+  }
+  const quotaCard=document.createElement('section');quotaCard.className='card span6';quotaCard.dataset.widget='codex';quotaCard.innerHTML='<div class="card-head"><h2>OpenAI Codex</h2><span class="label">USAGE LIMITS</span></div><div class="quota-body">Connect the Codex CLI to see account usage.</div>';cards.set('codex',quotaCard);grid.append(quotaCard);
+  async function refreshQuota(){
+    if(!active||demo||quotaBusy||document.hidden||quotaCard.hidden)return;quotaBusy=true;
+    const body=quotaCard.querySelector('.quota-body');
+    try{
+      const data=await api('codex-usage');if(!active)return;
+      if(!data.configured){body.innerHTML='<p>Connect your ChatGPT account through Codex CLI.</p><p class="subtle">Install @openai/codex, run codex login --device-auth as the Orbit service user, then enable CODEX_USAGE_ENABLED in .env.</p>';return;}
+      const windows=data.windows||[];
+      body.innerHTML=`<div class="quota-windows">${windows.map(w=>{
+        const duration=w.durationMinutes===300?'5-hour session':w.durationMinutes===10080?'Weekly':w.durationMinutes?`${w.durationMinutes/60} hour window`:'Usage window';
+        const seconds=w.resetsAt?Math.max(0,w.resetsAt-Date.now()/1000):null;
+        const countdown=seconds===null?'Reset time unavailable':seconds===0?'Reset due; awaiting updated reading':`${Math.floor(seconds/3600)}h ${Math.floor(seconds%3600/60)}m until reset`;
+        return `<div class="quota-window"><div class="quota-ring"><svg viewBox="0 0 120 120" aria-hidden="true"><circle class="quota-track" cx="60" cy="60" r="50"/><circle class="quota-value" cx="60" cy="60" r="50" pathLength="100" stroke-dasharray="${w.usedPercent} ${100-w.usedPercent}"/></svg><strong>${w.usedPercent.toFixed(0)}<small>% used</small></strong></div><h3>${esc(duration)}</h3><p class="quota-left">${w.remainingPercent.toFixed(0)}% left</p><p class="subtle">${countdown}</p>${w.resetsAt?`<p class="subtle">${esc(new Date(w.resetsAt*1000).toLocaleString())}</p>`:''}</div>`;
+      }).join('')}</div><p class="subtle">${data.plan?esc(data.plan)+' &middot; ':''}Updated ${esc(new Date(data.updatedAt).toLocaleTimeString())} &middot; Codex subscription limits</p>${windows.length?'':'<p>Usage windows are unavailable for this account.</p>'}`;
+    }catch(error){if(active)body.textContent='Usage unavailable: '+error.message;}finally{quotaBusy=false;}
   }
   const toolbar=document.createElement('section');toolbar.className='dashboard-toolbar';
   toolbar.innerHTML='<div><span class="eyebrow">YOUR DASHBOARD</span><p class="subtle" id="metrics-updated">Host metrics refresh automatically while this page is visible.</p></div><div class="dashboard-controls"><label>Server<select id="dashboard-node" aria-label="Proxmox server"><option value="">Auto select</option></select></label><button type="button" class="small-button" id="dashboard-refresh">Refresh stats</button><button type="button" class="primary" id="dashboard-customize">Customize</button></div>';
@@ -132,7 +149,7 @@ export function mountDashboard({api,esc,connected,demo,openModal,toast}){
     form.querySelector('#dashboard-reset').onclick=()=>{draft={...defaultLayout(),musicPlaylist:layout.musicPlaylist||''};form.elements.refresh.value='30';paint();};
     form.onsubmit=async e=>{e.preventDefault();if(saving||!active)return;saving=true;const button=form.querySelector('[type=submit]');button.disabled=true;try{draft.refresh=Number(form.elements.refresh.value);await save(draft);if(active){form.closest('dialog').close();toast(demo?'Demo layout updated for this visit.':'Dashboard layout saved.');lastSuccess=null;refreshNetwork();await refresh();}}catch(error){form.querySelector('.error').textContent=error.message;}finally{saving=false;button.disabled=false;}};
   };
-  const onVisible=()=>{if(!document.hidden){refresh();refreshNetwork();}};document.addEventListener('visibilitychange',onVisible);
-  (async()=>{try{if(!demo){const stored=await api('dashboard');if(!active)return;if(Array.isArray(stored.widgets)&&stored.widgets.length===definitions.length){layout=stored;if(layout.musicPlaylist===undefined)layout.musicPlaylist='';if(layout.cockpitVersion!==1){layout.cockpitVersion=1;layout.widgets=[...front.map(id=>({...layout.widgets.find(w=>w.id===id),visible:true})),...layout.widgets.filter(w=>!front.includes(w.id))];}}}}catch(error){if(active)toast('Could not load saved layout: '+error.message);}if(active){music();apply();schedule();refresh();refreshNetwork();if(!demo)networkTimer=setInterval(refreshNetwork,5000);}})();
-  return ()=>{active=false;clearInterval(timer);clearInterval(networkTimer);document.removeEventListener('visibilitychange',onVisible);};
+  const onVisible=()=>{if(!document.hidden){refresh();refreshNetwork();refreshQuota();}};document.addEventListener('visibilitychange',onVisible);
+  (async()=>{try{if(!demo){const stored=await api('dashboard');if(!active)return;if(Array.isArray(stored.widgets)&&[definitions.length,definitions.length-1].includes(stored.widgets.length)){layout=stored;if(!layout.widgets.some(w=>w.id==='codex'))layout.widgets.splice(6,0,{id:'codex',width:6,visible:true});if(layout.musicPlaylist===undefined)layout.musicPlaylist='';if(layout.cockpitVersion!==1){layout.cockpitVersion=1;layout.widgets=[...front.map(id=>({...layout.widgets.find(w=>w.id===id),visible:true})),...layout.widgets.filter(w=>!front.includes(w.id))];}}}}catch(error){if(active)toast('Could not load saved layout: '+error.message);}if(active){music();apply();schedule();refresh();refreshNetwork();refreshQuota();if(!demo){networkTimer=setInterval(refreshNetwork,5000);quotaTimer=setInterval(refreshQuota,60000);}}})();
+  return ()=>{active=false;clearInterval(timer);clearInterval(networkTimer);clearInterval(quotaTimer);document.removeEventListener('visibilitychange',onVisible);};
 }

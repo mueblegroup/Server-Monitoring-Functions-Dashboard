@@ -27,6 +27,7 @@ before(async()=>{
 });
 after(()=>{closeDatabase?.();rmSync(dir,{recursive:true,force:true});});
 test('private endpoints reject anonymous access',async()=>{assert.equal((await request('proxmox')).status,401);});
+test('Codex account usage requires a signed-in Orbit session',async()=>{assert.equal((await request('codex-usage')).status,401);});
 test('invalid credentials and hostile origins are rejected',async()=>{assert.equal((await request('login','POST',{email:'test@example.com',password:'bad'})).status,401);assert.equal((await request('login','POST',{}, {Origin:'https://evil.example'})).status,403);});
 test('remembered login has a 90-day HttpOnly cookie',async()=>{const r=await request('login','POST',{email:'test@example.com',password:'correct-long-passphrase',remember:true});assert.equal(r.status,200);const set=r.headers.get('set-cookie');assert.match(set,/Max-Age=7776000/);assert.match(set,/HttpOnly/);assert.match(set,/SameSite=Strict/);cookie=set.split(';')[0];csrf=(await r.json()).csrf;assert.equal((await request('session')).status,200);});
 test('actions require CSRF, explicit confirmation and configuration',async()=>{assert.equal((await request('proxmox','POST',{action:'stop'})).status,403);assert.equal((await request('proxmox','POST',{action:'stop'},{'X-CSRF-Token':csrf})).status,400);assert.equal((await request('proxmox','POST',{action:'stop',confirm:'stop'},{'X-CSRF-Token':csrf})).status,503);const r=await request('audit');const entries=await r.json();assert.equal(entries[0].outcome,'failed');});
