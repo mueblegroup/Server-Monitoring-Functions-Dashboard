@@ -1,0 +1,17 @@
+[Unit]
+Description=Orbit read-only host temperature and fan metrics
+After=network.target
+
+[Service]
+User=nobody
+Group=nogroup
+EnvironmentFile=/etc/orbit-sensors.env
+ExecStart=/usr/bin/python3 /opt/orbit-sensors/host-sensors.py
+Restart=on-failure
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
