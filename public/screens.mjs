@@ -88,8 +88,10 @@ export function mountScreenFit(){
     const available=Math.max(70,Math.min(viewport,bottom-6,app.getBoundingClientRect().bottom)-grid.getBoundingClientRect().top-38);
     const currentGeometry=`${Math.round(width)}/${Math.round(available)}`;
     if(currentGeometry!==geometryKey){geometryKey=currentGeometry;singleRow=false;}
+    const explicit=grid._orbitPlan;
     const geometry=screenGeometry(width,available,overview,window.innerWidth>viewport);
     if(singleRow){geometry.rows=1;geometry.cockpit=false;}
+    if(explicit)geometry.cockpit=false;
     const {columns,rows}=geometry;
     grid.style.setProperty('--screen-columns',String(columns));grid.style.setProperty('--screen-rows',String(rows));grid.style.setProperty('--screen-height',`${available}px`);
     const cards=[...grid.children].filter(el=>!el.hidden);
@@ -98,13 +100,15 @@ export function mountScreenFit(){
     const frontIndexes=new Set(frontCards.map(c=>c.id));
     const rest=cards.map((el,id)=>({id,width:Number([...el.classList].find(c=>/^span\d+$/.test(c))?.slice(4))||4})).filter(c=>!frontIndexes.has(c.id));
     pages=[...(frontCards.length?[frontCards.map(({el,id})=>({id,span:el.dataset.widget==='clock'?4:2}))]:[]),...packScreens(rest,columns,rows)];
+    if(explicit){pages=[explicit.map(p=>({id:cards.findIndex(c=>c.dataset.widget===p.id),span:p.w,placement:p})).filter(p=>p.id>=0)];grid.style.setProperty('--screen-columns','12');grid.style.setProperty('--screen-rows','6');}
     index=Math.max(0,Math.min(index,pages.length-1));
     const cockpitFront=Boolean(frontCards.length)&&index===0;
     document.body.classList.toggle('cockpit-front',cockpitFront);
     if(cockpitFront){grid.style.setProperty('--screen-columns','8');grid.style.setProperty('--screen-rows','2');}
     const visible=new Set((pages[index]||[]).map(item=>item.id));
     cards.forEach((el,id)=>el.classList.toggle('screen-card-hidden',!visible.has(id)));
-    for(const item of pages[index]||[])cards[item.id].style.setProperty('--screen-span',String(item.span));
+    for(const card of cards){card.style.removeProperty('--layout-column');card.style.removeProperty('--layout-row');}
+    for(const item of pages[index]||[]){const card=cards[item.id];card.style.setProperty('--screen-span',String(item.span));if(item.placement){const p=item.placement;card.style.setProperty('--layout-column',`${p.x+1} / span ${p.w}`);card.style.setProperty('--layout-row',`${p.y+1} / span ${p.h}`);}}
     pager.hidden=pages.length<=1;
     const key=`${index}/${pages.length}`;
     if(pager.dataset.state!==key){pager.dataset.state=key;pager.innerHTML=`<button type="button" class="small-button" data-step="-1" aria-label="Previous widget screen" ${index===0?'disabled':''}>Previous</button><span class="screen-position" role="status">Screen ${pages.length?index+1:0} of ${pages.length}</span><button type="button" class="small-button" data-step="1" aria-label="Next widget screen" ${index>=pages.length-1?'disabled':''}>Next</button>`;}
@@ -118,7 +122,7 @@ export function mountScreenFit(){
       card.classList.remove('fit-summary','fit-tight');
       if(card.scrollHeight>card.clientHeight+2)card.classList.add('fit-summary');
       if(card.scrollHeight>card.clientHeight+2)card.classList.add('fit-tight');
-      if(card.scrollHeight>card.clientHeight+2&&(rows>1||cockpitFront)&&!singleRow){singleRow=true;schedule();}
+      if(card.scrollHeight>card.clientHeight+2&&(rows>1||cockpitFront)&&!singleRow&&!explicit){singleRow=true;schedule();}
       for(const frame of card.querySelectorAll('iframe')){
         if(card.clientHeight<270&&frame.src.startsWith('https://www.youtube-nocookie.com/')){frame.dataset.deferredSrc=frame.src;frame.removeAttribute('src');}
         else if(card.clientHeight>=270&&frame.dataset.deferredSrc){frame.src=frame.dataset.deferredSrc;delete frame.dataset.deferredSrc;}
@@ -129,7 +133,7 @@ export function mountScreenFit(){
   pager.onclick=e=>{const button=e.target.closest('button');if(button)move(Number(button.dataset.step));};
   toggle.onclick=()=>{mode=!mode;try{localStorage.setItem('orbit-view-mode-v2',mode?'fit':'expanded');}catch{}schedule();};
   const key=e=>{if(document.querySelector('#modal').open||e.target.closest('input,textarea,select,button,a')||!['ArrowLeft','ArrowRight'].includes(e.key))return;if(move(e.key==='ArrowRight'?1:-1)){e.preventDefault();e.stopImmediatePropagation();}};
-  const touchStart=e=>{start=e.target.closest('input,textarea,select,button,a,dialog')?null:{x:e.changedTouches[0].screenX,y:e.changedTouches[0].screenY};};
+  const touchStart=e=>{start=e.target.closest('input,textarea,select,button,a,dialog,[data-widget="stack"]')?null:{x:e.changedTouches[0].screenX,y:e.changedTouches[0].screenY};};
   const touchEnd=e=>{if(!start)return;const dx=e.changedTouches[0].screenX-start.x,dy=e.changedTouches[0].screenY-start.y;start=null;if(Math.abs(dx)>70&&Math.abs(dx)>Math.abs(dy)*1.8&&move(dx<0?1:-1))e.stopImmediatePropagation();};
   window.addEventListener('keydown',key,true);app.addEventListener('touchstart',touchStart,{capture:true,passive:true});app.addEventListener('touchend',touchEnd,{capture:true,passive:true});
   const observer=new MutationObserver(schedule);observer.observe(grid,{childList:true,subtree:true,attributes:true,attributeFilter:['hidden']});
