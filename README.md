@@ -1,4 +1,4 @@
-# Orbit · Server Monitoring & Functions Dashboard
+# Orbit � Server Monitoring & Functions Dashboard
 
 A private, PhoneBox-inspired control center. Responsive phone/tablet/desktop layouts and swipeable Overview, Proxmox, Hestia, Cloudflare, Hostinger, Media, Activity and Connections pages. Original implementation; no PhoneBox source or assets copied.
 
@@ -47,6 +47,8 @@ Bootstrap credentials apply only to an empty users table. Changing ADMIN_PASSWOR
 | YouTube Music | Official player launcher | Embedded playback and remote controls not implemented. |
 
 Secrets are server environment variables listed in `.env.example`; they never reach browser storage. Connections are checked on page entry/manual refresh, not continuously polled. Clock updates each second. Asynchronous operation acceptance is audited, not provider task completion. Service-specific tokens must have least privilege and network reachability.
+
+Set `SERVER_TLS_VERIFY=false` in `.env` to skip certificate chain and hostname verification for Proxmox, Hestia, Jellyfin and the pfSense collector, including self-signed certificates and connections by IP address. Restart Orbit after changing it. HTTPS still encrypts these connections, but does not authenticate the server certificate in this mode. Cloudflare, Hostinger and weather requests keep normal certificate verification. The default is `true`; do not use the process-wide `NODE_TLS_REJECT_UNAUTHORIZED=0` setting.
 
 Hestia command profile:
 
