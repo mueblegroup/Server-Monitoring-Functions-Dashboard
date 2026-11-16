@@ -55,4 +55,14 @@ test('Stripe rejects forged signatures and deduplicates valid events',async()=>{
  const r=await request('stripe');assert.equal((await r.json()).events.length,1);
 });
 test('secrets are not exposed and frontend has a restrictive CSP',async()=>{const r=await request('session');assert.ok(!JSON.stringify(await r.json()).includes('whsec_test'));const html=await request('/');assert.equal(html.status,200);assert.match(html.headers.get('content-security-policy'),/frame-ancestors 'none'/);});
+test('Personal pages and bills require authentication and CSRF and persist validated values',async()=>{
+ assert.equal((await request('workspace','GET',undefined,{Cookie:''})).status,401);
+ assert.equal((await request('jellyfin/image?id=abc','GET',undefined,{Cookie:''})).status,401);
+ const workspace={pages:[{id:'custom',title:'My page',widgets:[{id:'codex',width:12,visible:true}]}],bills:[]};
+ assert.equal((await request('workspace','POST',workspace)).status,403);
+ assert.equal((await request('workspace','POST',workspace,{'X-CSRF-Token':csrf})).status,200);
+ assert.deepEqual(await (await request('workspace')).json(),workspace);
+ assert.equal((await request('workspace','POST',{pages:[],bills:[{id:'invalid'}]},{'X-CSRF-Token':csrf})).status,400);
+ assert.equal((await request('jellyfin/image?id=..%2F..&kind=Backdrop')).status,400);
+});
 test('logout invalidates session immediately',async()=>{assert.equal((await request('logout','POST',{}, {'X-CSRF-Token':csrf})).status,200);assert.equal((await request('session')).status,401);});
