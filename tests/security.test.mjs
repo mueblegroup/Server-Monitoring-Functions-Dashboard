@@ -40,6 +40,7 @@ test('Dashboard layouts require authenticated CSRF-protected writes and persist 
  const invalid=structuredClone(layout);invalid.widgets[0].id=invalid.widgets[1].id;
  assert.equal((await request('dashboard','POST',invalid,{'X-CSRF-Token':csrf})).status,400);
  assert.equal((await request('dashboard','POST',{...layout,refresh:1},{'X-CSRF-Token':csrf})).status,400);
+ assert.equal((await request('dashboard','POST',{...layout,musicPlaylist:'https://untrusted.example/'},{'X-CSRF-Token':csrf})).status,400);
  assert.deepEqual(await (await request('dashboard')).json(),layout);
  assert.equal((await request('dashboard', 'GET', undefined,{Cookie:''})).status,401);
 });

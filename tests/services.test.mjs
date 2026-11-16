@@ -59,6 +59,16 @@ test('Offline Proxmox nodes do not trigger status or storage calls',async()=>{
  mock([{data:[{node:'pve',status:'offline'}]},{data:[]}]);const result=await integration('proxmox',{view:'stats'},'GET');
  assert.equal(result.stats,null);assert.equal(calls.length,2);
 });
+test('Hardware sensors are sanitized and belong to the selected host',async()=>{
+ Object.assign(process.env,{PROXMOX_SENSORS_URL:'http://sensors.example:9109',PROXMOX_SENSORS_TOKEN:'sensor-secret'});
+ try{
+  const fixtures=()=>[{data:[{node:'pve',status:'online'}]},{data:[]},{data:{cpu:.25}},{data:[]}];
+  mock([...fixtures(),{node:'pve',temperatures:[{label:'CPU',celsius:55},{label:'invalid',celsius:999}],fans:[{label:'CPU fan',rpm:1200}]}]);
+  const result=await integration('proxmox',{view:'stats'},'GET');assert.equal(result.sensors.temperatures.length,1);assert.equal(result.sensors.fans[0].rpm,1200);assert.equal(calls[4].headers.Authorization,'Bearer sensor-secret');
+  mock([...fixtures(),{node:'different-host',temperatures:[{celsius:55}]}]);
+  const mismatch=await integration('proxmox',{view:'stats'},'GET');assert.equal(mismatch.sensors,null);assert.equal(mismatch.stats.cpu,.25);assert.match(mismatch.errors[0],/does not match/);
+ }finally{delete process.env.PROXMOX_SENSORS_URL;delete process.env.PROXMOX_SENSORS_TOKEN;}
+});
 test('A failed storage request preserves usable CPU and memory statistics',async()=>{
  let count=0;globalThis.fetch=async()=>{count++;if(count===1)return Response.json({data:[{node:'pve',status:'online'}]});if(count===2)return Response.json({data:[]});if(count===3)return Response.json({data:{cpu:.5}});return new Response('',{status:403});};
  const result=await integration('proxmox',{view:'stats'},'GET');assert.equal(result.stats.cpu,.5);assert.equal(result.errors.length,1);assert.deepEqual(result.storage,[]);

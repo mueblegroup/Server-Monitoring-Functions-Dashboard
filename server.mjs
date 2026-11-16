@@ -40,7 +40,7 @@ export async function handler(req,res){
   res.setHeader('X-Frame-Options','DENY');
   res.setHeader('Referrer-Policy','no-referrer');
   res.setHeader('Permissions-Policy','geolocation=(self), camera=(), microphone=()');
-  res.setHeader('Content-Security-Policy',"default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");
+  res.setHeader('Content-Security-Policy',"default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-src https://www.youtube-nocookie.com; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");
   res.setHeader('Cache-Control','no-store');
   if(secure) res.setHeader('Strict-Transport-Security','max-age=31536000');
   const send=(code,data)=>{res.writeHead(code,{'Content-Type':'application/json'});res.end(JSON.stringify(data));};
@@ -91,7 +91,8 @@ export async function handler(req,res){
       const b=JSON.parse(await body(req));
       const valid=['cpu','memory','storage','guests','health','clock','weather','infrastructure','network','music','stripe','movies','launch'];
       if(!b||!Array.isArray(b.widgets)||b.widgets.length!==valid.length||new Set(b.widgets.map(w=>w?.id)).size!==valid.length||b.widgets.some(w=>!w||!valid.includes(w.id)||typeof w.visible!=='boolean'||![4,6,12].includes(w.width))||![0,15,30,60].includes(b.refresh)||typeof b.node!=='string'||!/^[-\w.]{0,100}$/.test(b.node))fail('Invalid dashboard layout');
-      const value={widgets:b.widgets.map(({id,visible,width})=>({id,visible,width})),node:b.node,refresh:b.refresh};
+      if(b.musicPlaylist!==undefined&&(typeof b.musicPlaylist!=='string'||!/^[-\w]{0,150}$/.test(b.musicPlaylist)))fail('Invalid YouTube playlist ID');
+      const value={widgets:b.widgets.map(({id,visible,width})=>({id,visible,width})),node:b.node,refresh:b.refresh,...(b.musicPlaylist!==undefined?{musicPlaylist:b.musicPlaylist}:{})};
       db.prepare('INSERT INTO dashboard_preferences VALUES(?,?) ON CONFLICT(email) DO UPDATE SET value=excluded.value').run(session.email,JSON.stringify(value));
       send(200,value);return;
     }
