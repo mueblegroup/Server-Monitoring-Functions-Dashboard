@@ -7,10 +7,11 @@ const uptime=value=>{if(!numeric(value))return 'Unavailable';const h=Math.floor(
 export function mountDashboard({api,esc,connected,demo,openModal,toast}){
   const grid=document.querySelector('#app > .grid');
   if(!grid)return ()=>{};
-  let active=true,timer,busy=false,layout=defaultLayout(),latest=null,lastSuccess=null,saving=false;
+  let active=true,timer,networkTimer,networkBusy=false,busy=false,layout=defaultLayout(),latest=null,lastSuccess=null,saving=false;
   const cards=new Map();
   const existing=['clock','weather','infrastructure','network','music','stripe','movies','launch'];
   [...grid.children].forEach((el,index)=>{el.dataset.widget=existing[index];cards.set(existing[index],el);});
+  if(!demo){cards.get('network').innerHTML='<div class="card-head"><h2>Network pulse</h2><span class="label">PFSENSE</span></div><div id="network-metrics"><p>Connect pfSense SNMP to see WAN traffic and firewall health.</p></div>';}
   for(const [id,title] of definitions.slice(0,5)){
     const el=document.createElement('section');el.className='card span4';el.dataset.widget=id;
     el.innerHTML=`<div class="card-head"><h2>${title}</h2><span class="label">PROXMOX</span></div><div class="host-metric">${connected('proxmox')?'Loading metrics...':'Connect Proxmox to see host metrics.'}</div>`;
@@ -25,6 +26,18 @@ export function mountDashboard({api,esc,connected,demo,openModal,toast}){
     if(!layout.widgets.some(w=>w.visible))updated.textContent='All widgets are hidden. Choose Customize to add them back.';
   };
   const meter=(value)=>value===null?'':`<progress class="host-progress" max="100" value="${value.toFixed(1)}" aria-label="Usage ${value.toFixed(1)} percent"></progress>`;
+  async function refreshNetwork(){
+    if(!active||demo||networkBusy||document.hidden||cards.get('network').hidden||!connected('pfsense'))return;
+    networkBusy=true;
+    try{
+      const {data}=await api('pfsense');if(!active)return;
+      const rate=value=>numeric(value)?Number(value).toFixed(2):'--';
+      const body=cards.get('network').querySelector('#network-metrics');
+      body.innerHTML=`<div class="flex"><span class="mono">${esc(data.interface||'WAN')}</span><span class="status ${data.interfaceStatus==='up'?'':'off'}">${esc(data.interfaceStatus||'Connected')}</span></div><div class="network-values"><div><span class="subtle">Download</span><div class="metric mono">${rate(data.downloadMbps)}<small>Mbps</small></div></div><div><span class="subtle">Upload</span><div class="metric mono">${rate(data.uploadMbps)}<small>Mbps</small></div></div></div>${data.warmingUp?'<p class="subtle">Sampling traffic. Rates appear after the next refresh.</p>':''}<dl class="data-list"><dt>CPU (SNMP)</dt><dd>${numeric(data.cpuPercent)?Number(data.cpuPercent).toFixed(1)+'%':'Unavailable'}</dd><dt>Memory</dt><dd>${data.memory?Number(data.memory.percent).toFixed(1)+'% ('+bytes(data.memory.usedBytes)+' / '+bytes(data.memory.totalBytes)+')':'Unavailable'}</dd><dt>Firewall uptime</dt><dd>${uptime(data.uptimeSeconds)}</dd></dl><p class="subtle">${data.updatedAt?'Updated '+esc(new Date(data.updatedAt).toLocaleTimeString()):'Live collector'} &middot; refreshes every 5 seconds</p>`;
+      if(data.warnings?.length){const detail=document.createElement('details');detail.innerHTML='<summary>Metric notes</summary>';const text=document.createElement('p');text.textContent=data.warnings.join(' ');detail.append(text);body.append(detail);}
+    }catch(error){if(active){const body=cards.get('network').querySelector('#network-metrics');body.textContent='Network metrics unavailable: '+error.message;}}
+    finally{networkBusy=false;}
+  }
   const set=(id,html)=>{cards.get(id).querySelector('.host-metric').innerHTML=html;};
   function show(data){
     latest=data;const s=data.stats,selected=data.nodes.find(n=>n.node===data.node),online=selected?.status==='online';
@@ -63,7 +76,7 @@ export function mountDashboard({api,esc,connected,demo,openModal,toast}){
     if(demo){layout=next;apply();schedule();return;}
     layout=await api('dashboard',{method:'POST',body:JSON.stringify(next)});if(active){apply();schedule();}
   }
-  toolbar.querySelector('#dashboard-refresh').onclick=refresh;
+  toolbar.querySelector('#dashboard-refresh').onclick=()=>{refresh();refreshNetwork();};
   nodeSelect.onchange=async()=>{
     const previous=layout.node;
     try{await save({...layout,node:nodeSelect.value});lastSuccess=null;await refresh();}
@@ -77,9 +90,9 @@ export function mountDashboard({api,esc,connected,demo,openModal,toast}){
     list.onchange=e=>{const w=draft.widgets.find(w=>w.id===(e.target.dataset.id||e.target.dataset.width));if(w){if(e.target.dataset.id)w.visible=e.target.checked;else w.width=Number(e.target.value);}};
     list.onclick=e=>{const button=e.target.closest('button[data-move]');if(!button)return;const i=Number(button.dataset.move),j=i+Number(button.dataset.direction);[draft.widgets[i],draft.widgets[j]]=[draft.widgets[j],draft.widgets[i]];paint();list.querySelector(`[data-move="${j}"][data-direction="${button.dataset.direction}"]`)?.focus();};
     form.querySelector('#dashboard-reset').onclick=()=>{draft=defaultLayout();form.elements.refresh.value='30';paint();};
-    form.onsubmit=async e=>{e.preventDefault();if(saving||!active)return;saving=true;const button=form.querySelector('[type=submit]');button.disabled=true;try{draft.refresh=Number(form.elements.refresh.value);await save(draft);if(active){form.closest('dialog').close();toast(demo?'Demo layout updated for this visit.':'Dashboard layout saved.');lastSuccess=null;await refresh();}}catch(error){form.querySelector('.error').textContent=error.message;}finally{saving=false;button.disabled=false;}};
+    form.onsubmit=async e=>{e.preventDefault();if(saving||!active)return;saving=true;const button=form.querySelector('[type=submit]');button.disabled=true;try{draft.refresh=Number(form.elements.refresh.value);await save(draft);if(active){form.closest('dialog').close();toast(demo?'Demo layout updated for this visit.':'Dashboard layout saved.');lastSuccess=null;refreshNetwork();await refresh();}}catch(error){form.querySelector('.error').textContent=error.message;}finally{saving=false;button.disabled=false;}};
   };
-  const onVisible=()=>{if(!document.hidden)refresh();};document.addEventListener('visibilitychange',onVisible);
-  (async()=>{try{if(!demo){const stored=await api('dashboard');if(!active)return;if(Array.isArray(stored.widgets)&&stored.widgets.length===definitions.length)layout=stored;}}catch(error){if(active)toast('Could not load saved layout: '+error.message);}if(active){apply();schedule();refresh();}})();
-  return ()=>{active=false;clearInterval(timer);document.removeEventListener('visibilitychange',onVisible);};
+  const onVisible=()=>{if(!document.hidden){refresh();refreshNetwork();}};document.addEventListener('visibilitychange',onVisible);
+  (async()=>{try{if(!demo){const stored=await api('dashboard');if(!active)return;if(Array.isArray(stored.widgets)&&stored.widgets.length===definitions.length)layout=stored;}}catch(error){if(active)toast('Could not load saved layout: '+error.message);}if(active){apply();schedule();refresh();refreshNetwork();if(!demo)networkTimer=setInterval(refreshNetwork,5000);}})();
+  return ()=>{active=false;clearInterval(timer);clearInterval(networkTimer);document.removeEventListener('visibilitychange',onVisible);};
 }
