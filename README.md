@@ -73,6 +73,8 @@ Phase one is not production-verified against your services. Remaining: actual pr
 
 ## pfSense SNMP metrics
 
+Traffic rates are independent of SNMP `ifOperStatus`: PPP interfaces can report unknown or dormant even with valid byte counters. The status code remains visible in the API; rates still require two valid counter samples. UCD system-wide memory totals/free/buffers/cache are preferred over Host Resources pool accounting when available. Enable UCD in pfSense SNMP if the memory total does not match the installed RAM. Fallback accounting is explicitly noted.
+
 Orbit reads pfSense SNMP v2c directly; no metrics token, REST API package, or separate HTTP collector is required. On pfSense, enable **Services > SNMP**, MibII and Host Resources, bind to an internal interface, and allow UDP 161 from the Orbit container. Enable UCD as desired. Configure a private read community.
 
 On Debian/Ubuntu, install the client tools with `apt install snmp`. The Docker image includes them. Set these in `.env`, then restart Orbit:
@@ -91,6 +93,26 @@ The Overview network widget shows WAN receive/download and transmit/upload rates
 The community remains server-side and is passed through a temporary owner-readable SNMP configuration file, not command arguments. No write SNMP operations are used. Existing `PFSENSE_METRICS_URL`/`PFSENSE_METRICS_TOKEN` collectors remain supported if direct SNMP is not configured.
 
 ## Customizable overview and host statistics
+
+### OpenAI Codex usage gauges
+
+The **OpenAI Codex usage** widget shows primary/session and secondary/weekly percentage-used rings, remaining percentages, reset countdowns, and update time. Window durations and resets come from the actual account response; missing windows are unavailable rather than fabricated as 0%. These are Codex subscription limits, not a meter of every ChatGPT conversation or API billing. No guessed pacing, token totals, or credit balance is shown.
+
+For a native Linux Orbit install, install and log in to the official CLI **as the same OS user running Orbit**:
+
+```sh
+npm install -g @openai/codex
+codex login --device-auth
+```
+
+Complete the displayed OpenAI device login using the ChatGPT account whose limits you want to monitor. An API key is not a substitute for the ChatGPT subscription login. Add to Orbit `.env` and restart:
+
+```dotenv
+CODEX_USAGE_ENABLED=true
+CODEX_BIN=codex
+```
+
+If the executable is outside the service PATH, use its absolute path in CODEX_BIN. Orbit reads `account/rateLimits/read` through `codex app-server` after initialization, without starting a model turn. The server caches successful readings for 60 seconds and only sends sanitized limit data to authenticated dashboard users. No account email, account ID, or auth tokens are sent to the browser. The Codex CLI is optional and is not installed in the base Docker image: Docker deployments must add the official CLI to their image and supply persistent CLI authentication for the `node` user before enabling this setting. Login credentials for the ChatGPT app on a different computer are not automatically available inside the Orbit container.
 
 The first landscape screen uses a cockpit arrangement: large clock/local weather on the left, music on the right, and four small CPU, RAM, host/root-disk, and WAN tiles beneath. Hardware sensor badges remain in the host tile. Other widgets continue on subsequent screens. On smaller portrait displays, normal card packing preserves readability. Use Expand view to see all detail fields and the custom widget widths.
 
