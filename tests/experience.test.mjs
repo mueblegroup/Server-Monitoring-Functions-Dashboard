@@ -4,7 +4,7 @@ import {defaultExperience,placementsValid,energySummary,billingTotals,healthAler
 import {validateExperience} from '../experience-state.mjs';
 test('orientation layouts reject overlaps, out of bounds and unsupported tiles',()=>{
  const value=defaultExperience();value.layouts.overview={portrait:[{id:'cpu',x:0,y:0,w:12,h:2}],landscape:[{id:'cpu',x:0,y:0,w:6,h:3},{id:'memory',x:6,y:0,w:6,h:3}]};assert.deepEqual(validateExperience(value),value);
- for(const change of [v=>v.layouts.overview.landscape[1].x=5,v=>v.layouts.overview.portrait[0].h=7,v=>v.layouts.overview.portrait[0].id='script',v=>v.layouts.overview.portrait[0].x=.5,v=>v.appearance.accent='red;position:fixed',v=>v.kiosk.pages=['javascript:alert(1)'],v=>v.electricity.rate=-1,v=>v.stack.items=[]]){const copy=structuredClone(value);change(copy);assert.throws(()=>validateExperience(copy));}
+ for(const change of [v=>v.layouts.overview.landscape[1].x=5,v=>v.layouts.overview.portrait[0].h=7,v=>v.layouts.overview.portrait[0].id='script',v=>v.layouts.overview.portrait[0].x=.5,v=>v.appearance.accent='red;position:fixed',v=>v.kiosk.pages=['javascript:alert(1)'],v=>v.electricity.rate=-1,v=>v.stack.items=[],v=>v.gauges.cpu='red;display:none',v=>v.gauges.fanMaxRpm=0]){const copy=structuredClone(value);change(copy);assert.throws(()=>validateExperience(copy));}
  assert.equal(placementsValid([{id:'cpu',x:0,y:0,w:6,h:2},{id:'memory',x:6,y:0,w:6,h:2}],['cpu','memory']),true);
 });
 test('energy integrates actual power samples and excludes missing-data gaps',()=>{
