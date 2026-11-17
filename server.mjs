@@ -1,3 +1,4 @@
+import {createActivityStore} from './codex-activity.mjs';
 import {createMonitoring} from './monitoring.mjs';
 import {validateExperience} from './experience-state.mjs';
 import http from 'node:http';
@@ -24,6 +25,7 @@ db.exec('CREATE TABLE IF NOT EXISTS dashboard_preferences(email TEXT PRIMARY KEY
 db.exec('CREATE TABLE IF NOT EXISTS personal_workspace(email TEXT PRIMARY KEY,value TEXT NOT NULL)');
 db.exec('CREATE TABLE IF NOT EXISTS dashboard_experience(email TEXT PRIMARY KEY,value TEXT NOT NULL)');
 const monitoring=createMonitoring(db);
+const activity=createActivityStore(db);
 const digest = s => createHash('sha256').update(s).digest('hex');
 const token = () => randomBytes(32).toString('hex');
 const admin = process.env.ADMIN_EMAIL;
@@ -44,7 +46,7 @@ files['/spotify-player.mjs']=['public/spotify-player.mjs','text/javascript'];
 files['/billing.mjs']=['public/billing.mjs','text/javascript'];
 files['/motion.mjs']=['public/motion.mjs','text/javascript'];
 files['/motion.css']=['public/motion.css','text/css'];
-for(const name of ['experience','experience-data','layout-editor','kiosk'])files['/'+name+'.mjs']=['public/'+name+'.mjs','text/javascript'];
+for(const name of ['experience','experience-data','layout-editor','kiosk','rpm','presence'])files['/'+name+'.mjs']=['public/'+name+'.mjs','text/javascript'];
 files['/experience.css']=['public/experience.css','text/css'];
 files['/personal.mjs']=['public/personal.mjs','text/javascript'];
 async function body(req) {
@@ -57,7 +59,7 @@ export async function handler(req,res){
   res.setHeader('X-Content-Type-Options','nosniff');
   res.setHeader('X-Frame-Options','DENY');
   res.setHeader('Referrer-Policy','no-referrer');
-  res.setHeader('Permissions-Policy','geolocation=(self), camera=(), microphone=(), encrypted-media=(self "https://sdk.scdn.co")');
+  res.setHeader('Permissions-Policy','geolocation=(self), camera=(self), microphone=(), encrypted-media=(self "https://sdk.scdn.co")');
   res.setHeader('Content-Security-Policy',"default-src 'self'; script-src 'self' https://sdk.scdn.co; style-src 'self'; img-src 'self' data: https://i.scdn.co https://mosaic.scdn.co https://*.spotifycdn.com; connect-src 'self' https://*.spotify.com wss://*.spotify.com https://*.scdn.co; frame-src https://www.youtube-nocookie.com https://sdk.scdn.co; media-src 'self' blob: https://*.scdn.co https://*.spotifycdn.com; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");
   res.setHeader('Cache-Control','no-store');
   if(secure) res.setHeader('Strict-Transport-Security','max-age=31536000');
@@ -65,6 +67,9 @@ export async function handler(req,res){
   try {
     const url=new URL(req.url,origin), path=url.pathname;
     if(req.method==='GET' && files[path]) {const [file,type]=files[path];res.writeHead(200,{'Content-Type':type});res.end(readFileSync(resolve(root,file)));return;}
+    if(req.method==='GET'&&/^\/vision\/(tf\.min\.js|coco-ssd\.min\.js|model\.json|assets\.json|group\d+-shard\d+of\d+(?:\.bin)?)$/.test(path)){
+      try{const bytes=readFileSync(resolve(root,'public'+path));res.writeHead(200,{'Content-Type':path.endsWith('.js')?'text/javascript':path.endsWith('.json')?'application/json':'application/octet-stream','Cache-Control':'private, max-age=86400'});res.end(bytes);}catch{send(404,{error:'Vision assets not installed. Run npm run setup:vision.'});}return;
+    }
     // Cross-site OAuth callbacks cannot rely on the SameSite=Strict session cookie.
     // The one-use state is bound to an existing, still-valid Orbit session instead.
     if(path==='/api/spotify/callback'&&req.method==='GET'){
@@ -81,6 +86,11 @@ export async function handler(req,res){
       const event=JSON.parse(raw),obj=event.data?.object||{};
       db.prepare('INSERT OR IGNORE INTO events VALUES(?,?,?,?,?)').run(event.id,new Date().toISOString(),event.type,obj.amount_received??obj.amount??0,obj.currency||'');
       send(200,{received:true});return;
+    }
+    if(path==='/api/agent-events'&&req.method==='POST'){
+      const secret=process.env.ORBIT_ACTIVITY_TOKEN||'',given=Buffer.from(req.headers.authorization||''),expected=Buffer.from('Bearer '+secret);
+      if(secret.length<24||given.length!==expected.length||!timingSafeEqual(given,expected))fail('Invalid activity reporting token',401);
+      send(200,activity.record(JSON.parse(await body(req))));return;
     }
     const callback=path.match(/^\/api\/automation-events\/([-\w]{1,64})$/);
     if(callback&&req.method==='POST'){
@@ -112,6 +122,7 @@ export async function handler(req,res){
     if(!session) fail('Sign in to continue',401);
     if(req.method!=='GET'&&req.headers['x-csrf-token']!==session.csrf) fail('Session verification failed',403);
     if(path==='/api/session'&&req.method==='GET'){send(200,{email:session.email,csrf:session.csrf,configured:configured()});return;}
+    if(path==='/api/agent-activity'&&req.method==='GET'){send(200,await activity.read());return;}
     if(path==='/api/codex-usage'&&req.method==='GET'){send(200,await codexUsage());return;}
     if(path==='/api/spotify/status'&&req.method==='GET'){send(200,spotify.status(session.email));return;}
     if(req.method==='POST'&&path==='/api/spotify/connect'){send(200,spotify.connect(session.email,digest(sid)));return;}

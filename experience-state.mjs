@@ -5,6 +5,7 @@ export function validateExperience(input){
   if(!input||typeof input!=='object')fail();const d=defaultExperience(),out=structuredClone(d);
   const num=(v,min,max)=>Number.isFinite(v)&&v>=min&&v<=max;
   const appearance=a=>{if(!a||!['original','rounded','flat','glass'].includes(a.preset)||!/^#[0-9a-fA-F]{6}$/.test(a.accent)||!['system','rounded','mono'].includes(a.font)||!num(a.spacing,4,24)||!num(a.corners,0,32)||!num(a.opacity,.4,1))fail();return {preset:a.preset,accent:a.accent,font:a.font,spacing:a.spacing,corners:a.corners,opacity:a.opacity};};
+  const g=input.gauges??d.gauges;if(!g||['cpu','memory','temperature','fan','health'].some(k=>typeof g[k]!=='string'||!/^#[0-9a-fA-F]{6}$/.test(g[k]))||!num(g.temperatureMax,40,200)||!num(g.fanMaxRpm,100,100000))fail();out.gauges=Object.fromEntries(['cpu','memory','temperature','fan','health','temperatureMax','fanMaxRpm'].map(k=>[k,g[k]]));
   out.appearance=appearance(input.appearance??d.appearance);
   for(const [key,value] of Object.entries(input.pageAppearance||{})){if(!pageKey(key)||Object.keys(out.pageAppearance).length>=27)fail();out.pageAppearance[key]=appearance(value);}
   for(const [key,value] of Object.entries(input.layouts||{})){
