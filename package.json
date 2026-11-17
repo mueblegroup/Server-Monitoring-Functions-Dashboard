@@ -1,5 +1,14 @@
 {
-  "name": "orbit-control", "version": "0.1.0", "private": true,
-  "type": "module", "engines": {"node": ">=22.13"},
-  "scripts": {"start": "node --env-file-if-exists=.env server.mjs", "test": "node --test tests/*.test.mjs"}
+  "name": "orbit-control",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.13"
+  },
+  "scripts": {
+    "start": "node --env-file-if-exists=.env server.mjs",
+    "test": "node --test tests/*.test.mjs",
+    "setup:vision": "node deploy/setup-vision.mjs"
+  }
 }
