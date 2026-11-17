@@ -79,4 +79,13 @@ test('Display settings, monitoring history and workflow triggers enforce session
  assert.equal((await request('automation-events/job','POST',{status:'success',summary:'Done'},{Authorization:'Bearer '+'a'.repeat(32),Cookie:'',Origin:undefined})).status,200);
  assert.equal((await (await request('operations')).json()).actions[0].result.status,'success');delete process.env.ORBIT_AUTOMATIONS;
 });
+test('CLI activity requires a session and remote reporters need a separate token without browser Origin',async()=>{
+ assert.equal((await request('agent-activity','GET',undefined,{Cookie:''})).status,401);
+ const report={source:'desktop',sessions:[{sessionId:'chat-1',status:'completed',updatedAt:new Date().toISOString()}]};
+ process.env.ORBIT_ACTIVITY_TOKEN='b'.repeat(32);
+ assert.equal((await request('agent-events','POST',report,{Cookie:'',Origin:undefined,Authorization:'Bearer wrong'})).status,401);
+ assert.equal((await request('agent-events','POST',report,{Cookie:'',Origin:undefined,Authorization:'Bearer '+'b'.repeat(32)})).status,200);
+ assert.equal((await (await request('agent-activity')).json()).sessions[0].status,'completed');delete process.env.ORBIT_ACTIVITY_TOKEN;
+ const headers=(await request('/')).headers;assert.match(headers.get('permissions-policy'),/camera=\(self\)/);assert.match(headers.get('permissions-policy'),/microphone=\(\)/);
+});
 test('logout invalidates session immediately',async()=>{assert.equal((await request('logout','POST',{}, {'X-CSRF-Token':csrf})).status,200);assert.equal((await request('session')).status,401);});
