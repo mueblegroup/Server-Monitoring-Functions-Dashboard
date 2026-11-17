@@ -1,4 +1,14 @@
 const esc=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+// Choose complete rows of proportional dials using both available dimensions.
+export function rpmLayout(width,height,count=5,gap=5){
+  let best={columns:1,width:0};
+  for(let columns=1;columns<=count;columns++){
+    const rows=Math.ceil(count/columns);
+    const size=Math.max(0,Math.min(180,(width-gap*(columns-1))/columns,(height-gap*(rows-1))/rows*140/125));
+    if(size>best.width)best={columns,width:size};
+  }
+  return best;
+}
 export const gaugeDefaults=()=>({cpu:'#2ad4bc',memory:'#a78bfa',temperature:'#f6ac38',fan:'#78c9ed',health:'#a3d94c',temperatureMax:120,fanMaxRpm:12000});
 export function rpmGauge(value,{label='',unit='%',max=100,color='#c4f284',digits=0}={}){
   const valid=typeof value==='number'&&Number.isFinite(value),safeColor=/^#[0-9a-f]{6}$/i.test(color)?color:'#c4f284',limit=Number.isFinite(max)&&max>0?max:100;
