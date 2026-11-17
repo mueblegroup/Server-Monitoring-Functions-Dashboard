@@ -24,7 +24,7 @@ export function layoutFits(plan,width,height,gap=12){
 function compactReading(card){
   const text=selector=>[...card.querySelectorAll(selector)].find(el=>!el.closest('.tile-compact-view'))?.textContent?.trim().replace(/\s+/g,' ')||'';
   const title=text('h2')||({clock:'Clock',weather:'Weather',music:'Music'}[card.dataset.widget])||'Dashboard tile';
-  const value=text('.metric')||text('.clock')||text('.spotify-title')||text('.movie-caption h2')||text('.billing-gauge strong')||text('.billing-total strong')||text('.quota-window strong')||text('.guest-totals strong')||text('.resource h3')||text('.monitor-row')||text('.automation-row h3')||text('.billing-content h3')||text('h3')||'Open Details';
+  const value=text('.metric')||text('.clock')||text('.spotify-title')||text('.movie-caption h2')||text('.billing-gauge strong')||text('.billing-total strong')||text('.quota-window strong')||text('.guest-totals strong')||text('.rpm-reading')||text('.agent-status-row strong')||text('.resource h3')||text('.monitor-row')||text('.automation-row h3')||text('.billing-content h3')||text('h3')||'Open Details';
   const note=text('.spotify-artist')||text('.stack-reading p')||text('.billing-content p')||text('.billing-total p')||text('.host-metric p')||text('#date');
   return {title,value,note};
 }
