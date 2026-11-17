@@ -12,3 +12,18 @@ dialog:has(.layout-editor){width:min(1100px,94vw)}.layout-stage{display:grid;gri
 @media(prefers-reduced-motion:reduce){.rpm-arc,.rpm-needle{transition:none}}
 .detail-card .agent-status-row,.detail-card .agent-status-row .subtle{display:block!important}
 .screen-fit #app>.grid>.card .has-rpm>.host-rpm{height:clamp(65px,40cqh,140px);margin-bottom:42px}
+/* Gauge dimensions follow the space left inside each tile, never the viewport. */
+.rpm-gauge{container-type:inline-size;flex-shrink:0}
+.rpm-gauge .rpm-reading strong{font-size:clamp(14px,23cqw,38px)}
+.rpm-gauge .rpm-reading span{font-size:clamp(8px,8cqw,11px)}
+.rpm-gauge .rpm-label{font-size:clamp(8px,8cqw,11px);overflow:visible;text-overflow:clip}
+.screen-fit #app>.grid>.card .host-metric.has-rpm{display:flex;flex-direction:column;gap:4px}
+.screen-fit #app>.grid>.card .has-rpm>.host-rpm{container-type:size;flex:1 1 0;min-height:0;height:auto;margin:0;align-items:center}
+.screen-fit #app>.grid>.card .host-rpm .rpm-gauge{width:min(100cqw,112cqh,180px);height:auto;max-height:none;max-width:none;aspect-ratio:140/125}
+.screen-fit #app>.grid>.card .has-rpm>:not(.host-rpm){flex-shrink:0}
+.screen-fit #app>.grid>.card .has-rpm>.metric-trend{position:static;inset:auto;height:clamp(20px,12cqh,40px);margin:0}
+.screen-fit #app>.grid>.card .has-rpm>.trend-empty{position:static;inset:auto;height:20px;margin:0}
+.screen-fit #app>.grid>.card .hardware-gauges{grid-template-columns:repeat(var(--gauge-columns,3),minmax(0,1fr));grid-auto-rows:minmax(0,1fr);gap:5px;align-content:center}
+.screen-fit #app>.grid>.card .hardware-gauges .rpm-gauge{width:var(--gauge-width,70px);height:auto;max-height:none;max-width:100%;aspect-ratio:140/125}
+.screen-fit #app>.grid>.card .rpm-gauge .rpm-reading strong{font-size:clamp(14px,23cqw,38px)}
+.screen-fit #app>.grid>.card:has(.hardware-gauges)>p.subtle{margin:4px 0 0;font-size:9px}

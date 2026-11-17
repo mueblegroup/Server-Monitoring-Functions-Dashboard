@@ -1,3 +1,4 @@
+import {rpmLayout} from './rpm.mjs';
 // Screen geometry reserves room for controls rather than allowing nested scrolling.
 export function screenGeometry(width,height,overview=false,landscape=false){
   const columns=width<620?1:width<1050?2:3;
@@ -34,6 +35,8 @@ function fitCard(card){
   const overflowing=()=>card.scrollHeight>card.clientHeight+2||card.scrollWidth>card.clientWidth+2;
   if(card.clientWidth<270||card.clientHeight<250||overflowing())card.classList.add('fit-summary');
   if(card.clientHeight<200||overflowing())card.classList.add('fit-tight');
+  const board=card.querySelector('.hardware-gauges');
+  if(board){const layout=rpmLayout(board.clientWidth,board.clientHeight,board.children.length);board.style.setProperty('--gauge-columns',layout.columns);board.style.setProperty('--gauge-width',layout.width+'px');}
   // Scale content only, leaving the card grid and the Details touch target unchanged.
   for(let scale=.95;overflowing()&&scale>=.749;scale-=.05)card.style.setProperty('--tile-scale',scale.toFixed(2));
   if(!overflowing())return;
