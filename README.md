@@ -297,3 +297,40 @@ Supported statuses are running/success/failed; summary is plain text up to 500 c
 Billing overview combines fixed bills and available Hostinger renewal prices into monthly/yearly equivalents **per currency**, with upcoming due dates. Do not add the same Hostinger cost manually unless you intend it to be counted twice. There is no currency conversion or payment verification.
 
 Saved visual layouts now automatically reflow into readable widget screens when their cells would be smaller than 180 × 140 pixels. The original portrait/landscape coordinates are preserved and restored when there is enough space. Font sizes follow both tile width and height; compact readings use whole lines, with full controls/content available in Details.
+
+### Hardware RPM gauges
+
+Add **Hardware gauges** through Customize or a custom page. It shows CPU, RAM, highest reported temperature, highest reported fan speed, and root disk usage. Existing CPU, RAM and host health cards also use gauges. Health alerts remain based on actual conditions; root disk usage is not an invented health score. Missing readings remain unavailable. HP fans reported as percent stay in percent; RPM appears only when the collector reports RPM. Configure five independent colours and temperature/fan scale maxima in **Display > RPM gauge colours**. The existing host sensor collector must be connected for temperatures and fans.
+
+### Camera break reminder
+
+Install the optional browser detector assets once on the Orbit server, then restart:
+
+```sh
+cd /opt/orbit
+npm run setup:vision
+systemctl restart orbit
+```
+
+The installer downloads pinned TensorFlow.js 4.22.0 and COCO-SSD 2.2.3 scripts from jsDelivr, the lite MobileNet model from Google's TensorFlow model storage, and project licences. Assets and their hashes are written to ignored `public/vision/`. Runtime requests use Orbit's own origin; CSP remains strict without unsafe-eval. For Docker, install assets before building the image or persist `public/vision` and run setup inside the container; otherwise a rebuild removes downloaded assets.
+
+Open Orbit over HTTPS on the tablet/phone, select **Breaks > Start camera**, and allow the front camera. Microphone access is disabled. The visible camera indicator shows detected minutes. The on-device person detector samples about every two seconds and shows a dismissible break reminder after 30 detected minutes. Dismiss starts a fresh 30-minute interval; Stop, sign-out, or reload stops detection. Camera frames are neither recorded nor uploaded, and no face identity is inferred. Closing the settings dialog keeps detection running until stopped.
+
+Keep Orbit visible: hidden tabs, long sampling gaps and camera errors reset the timer; 60 seconds without a person resets it too. Brief missed detections pause accumulation. This is a convenience reminder; lighting, camera placement, browser support and device performance affect detection and battery use. Reverse proxies must preserve `Permissions-Policy: camera=(self), microphone=()` rather than overriding camera access with `camera=()`.
+
+### Codex activity status
+
+Add **Codex activity** to a page. It displays last-known CLI lifecycle events and timestamps, updating about every ten seconds. It reads status metadata only, never prompts, responses, source code or login credentials. It does not prove that a process is still running: old working events and disconnected reporters are marked stale. Session log formats are best-effort and may change. ChatGPT web/app conversation status is unavailable; this integration cannot inspect those conversations.
+
+If Codex runs on the Orbit host, set `CODEX_ACTIVITY_ENABLED=true` and, if needed, `CODEX_SESSIONS_DIR=/path/to/.codex/sessions` in Orbit's `.env`, then restart. The systemd service user needs read access to that directory.
+
+If Codex runs on your Windows PC while Orbit runs in the container, set a separate random `ORBIT_ACTIVITY_TOKEN` of at least 24 characters in the server `.env` and restart Orbit. On that PC, from this checkout, run the reporter with the same token:
+
+```powershell
+$env:ORBIT_ACTIVITY_URL = 'https://orbit.mueble-playground.cc'
+$env:ORBIT_ACTIVITY_TOKEN = 'YOUR_SEPARATE_RANDOM_REPORTING_TOKEN'
+$env:ORBIT_ACTIVITY_SOURCE = 'desk-pc'
+node deploy/codex-status-agent.mjs
+```
+
+Leave it running to report that computer's CLI session statuses. Use a unique source label per computer. The reporter sends only session identifiers, status and timestamps to the authenticated `/api/agent-events` endpoint over HTTPS. Browser readers require an Orbit session. The reporting token grants only status reporting, not server control or chat access. The optional JSON contract is `{source:"desk-pc",sessions:[{sessionId:"session-id",status:"working",updatedAt:"ISO_TIMESTAMP"}]}`; accepted statuses are working, waiting, completed, interrupted, failed and idle. The built-in CLI parser reports started/completed/interrupted events where present, rather than guessing waiting states.
