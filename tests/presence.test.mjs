@@ -1,6 +1,20 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {PresenceClock,PersonPresence} from '../public/presence.mjs';
+import {PresenceClock,PersonPresence,WorkTimer} from '../public/presence.mjs';
+test('manual work sessions pause at thirty minutes and resume only on explicit start',()=>{
+ const timer=new WorkTimer();assert.equal(timer.state(0).phase,'idle');
+ assert.deepEqual(timer.start(1000),{phase:'working',remainingMs:1800000});
+ assert.deepEqual(timer.state(1800999),{phase:'working',remainingMs:1});
+ assert.deepEqual(timer.state(1801000),{phase:'break',remainingMs:0});
+ assert.equal(timer.state(9999999).phase,'break');
+ assert.deepEqual(timer.start(10000000),{phase:'working',remainingMs:1800000});
+ timer.stop();assert.equal(timer.state(10000001).phase,'idle');
+});
+test('manual deadlines catch up after background throttling without counting a second session',()=>{
+ const timer=new WorkTimer();timer.start(0);
+ assert.equal(timer.state(7200000).phase,'break');
+ assert.equal(timer.state(9000000).phase,'break');
+});
 test('relaxed person detection needs repeated weak evidence and survives brief misses',()=>{
  const person=new PersonPresence();
  assert.equal(person.sample(.3,0).present,false);
