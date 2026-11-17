@@ -96,7 +96,7 @@ export function mountDashboard({api,esc,connected,demo,openModal,toast,customPag
   }
   const set=(id,html)=>{cards.get(id).querySelector('.host-metric').innerHTML=html;};
   function show(data){
-    latest=data;experience?.update();const s=data.stats,selected=data.nodes.find(n=>n.node===data.node),online=selected?.status==='online';
+    latest=data;const s=data.stats,selected=data.nodes.find(n=>n.node===data.node),online=selected?.status==='online';
     const clockStatus=cards.get('clock').querySelector('.status');if(clockStatus)clockStatus.textContent=`${data.node||'No host'} · ${online?'Online':'Offline'}`;
     const options=data.nodes.map(n=>`<option value="${esc(n.node)}">${esc(n.node)}${n.status==='online'?'':' (offline)'}</option>`).join('');
     nodeSelect.innerHTML=options||'<option value="">No servers found</option>';nodeSelect.value=data.node||'';
@@ -129,6 +129,7 @@ export function mountDashboard({api,esc,connected,demo,openModal,toast,customPag
     }).join(''):'<p>No storage metrics available.</p>');
     const guests=data.guests||[],running=guests.filter(g=>g.status==='running').length;
     set('guests',`<div class="guest-totals"><div><strong>${running}</strong><span>Running</span></div><div><strong>${guests.filter(g=>g.status==='stopped').length}</strong><span>Stopped</span></div><div><strong>${guests.filter(g=>g.type==='lxc').length}</strong><span>CTs</span></div><div><strong>${guests.filter(g=>g.type==='qemu').length}</strong><span>VMs</span></div></div><p class="subtle">${esc(data.node||'No server selected')} &middot; ${guests.length} guests total</p><a class="small-button" href="#proxmox">Manage containers & VMs</a>`);
+    experience?.update();
     const stamp=new Date(data.updatedAt).toLocaleTimeString();
     updated.textContent=demo?'Sample metrics - demo only':`Updated ${stamp}${data.errors?.length?' - Some metrics unavailable':''}`;
     if(data.errors?.length){const detail=document.createElement('details');detail.innerHTML='<summary>Metric connection details</summary>';const p=document.createElement('p');p.textContent=data.errors.join(' | ');detail.append(p);cards.get('health').querySelector('.host-metric').append(detail);}
