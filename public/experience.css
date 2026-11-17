@@ -27,3 +27,6 @@ dialog:has(.layout-editor){width:min(1100px,94vw)}.layout-stage{display:grid;gri
 .screen-fit #app>.grid>.card .hardware-gauges .rpm-gauge{width:var(--gauge-width,70px);height:auto;max-height:none;max-width:100%;aspect-ratio:140/125}
 .screen-fit #app>.grid>.card .rpm-gauge .rpm-reading strong{font-size:clamp(14px,23cqw,38px)}
 .screen-fit #app>.grid>.card:has(.hardware-gauges)>p.subtle{margin:4px 0 0;font-size:9px}
+/* Keep the capture source playing outside dialogs, including on mobile browsers. */
+.presence-source{position:fixed;left:0;bottom:0;width:1px;height:1px;opacity:.01;pointer-events:none;z-index:-1}
+#presence-sensitivity{display:block;width:100%;margin:6px 0 12px}
